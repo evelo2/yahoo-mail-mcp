@@ -1,0 +1,24 @@
+# Environment
+.env
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# OS files
+.DS_Store
+
+# Config data (contains real email addresses / PII)
+config/sender-rules.json
+config/custom-actions.json
+config/custom-actions copy.json
+config/sender-rules.backup.json
+config/*.bak.*
+
+# Runtime data (audit log, prompt versions)
+config/audit.jsonl
+config/prompt_versions/
+config/prompt_meta.json
+config/prompt.md
