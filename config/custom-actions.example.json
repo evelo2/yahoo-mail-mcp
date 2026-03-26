@@ -1,0 +1,12 @@
+{
+  "social": {
+    "folder": "Social Media",
+    "mark_read": true,
+    "flag": false
+  },
+  "banking": {
+    "folder": "Banking",
+    "mark_read": false,
+    "flag": true
+  }
+}

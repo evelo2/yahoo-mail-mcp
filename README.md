@@ -50,19 +50,47 @@ Emails sitting in your INBOX are considered **unprocessed**. The server maintain
 ### Installation
 
 ```bash
+git clone https://github.com/evelo2/yahoo-mail-mcp.git
+cd yahoo-mail-mcp
 npm install
 npm run build
 ```
 
 ### Configuration
 
-Copy the example environment file and fill in your credentials:
+**1. Environment variables** — copy the example and fill in your credentials:
 
 ```bash
 cp .env.example .env
 ```
 
-Required variables:
+Edit `.env` and set at minimum:
+```
+YAHOO_EMAIL=your-email@yahoo.com
+YAHOO_APP_PASSWORD=your-16-char-app-password
+```
+
+**2. Config files** — create from the provided examples:
+
+```bash
+cp config/sender-rules.example.json config/sender-rules.json
+cp config/custom-actions.example.json config/custom-actions.json
+```
+
+These files are gitignored (they contain email addresses / PII once populated). The examples show the expected format.
+
+### First Run
+
+On first startup the server will:
+
+1. **Load sender rules** from `config/sender-rules.json` — if using the example template, you'll start with a few placeholder rules. Replace or remove these as you classify real senders.
+2. **Load custom actions** from `config/custom-actions.json` — defines action types beyond the built-ins. The example shows the format; you can start with an empty `{}` if you only need the built-in actions.
+3. **Create `config/prompt.md`** automatically with default operating instructions (version 1). This is the runtime prompt retrieved by `get_prompt`.
+4. **Run preflight checks** — connects to Yahoo IMAP, verifies inbox access, and checks required folders. If this fails, check your `.env` credentials. Set `SKIP_PREFLIGHT=true` to bypass during development.
+
+After the first session of classifying senders, your `sender-rules.json` will grow as rules are added via `classify_sender` and `classify_senders`. This file is the primary accumulated state — it is automatically backed up (5 rolling copies) before every save.
+
+### Environment Variables
 
 | Variable | Description | Default |
 |---|---|---|
@@ -81,6 +109,21 @@ Required variables:
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins | _(none — all denied)_ |
 | `RATE_LIMIT_RPM` | Max requests per minute per IP | `100` |
 | `AUDIT_RETENTION_DAYS` | Days to keep audit log entries | `10` |
+
+### Config Files
+
+All config files live in the `config/` directory and are gitignored (they contain PII once populated).
+
+| File | Purpose | Auto-created? |
+|---|---|---|
+| `sender-rules.json` | Exact and regex sender→action mappings | No — copy from example |
+| `custom-actions.json` | User-defined action types (folder, flags) | No — copy from example |
+| `prompt.md` | Runtime prompt for AI sessions | Yes — default created on first run |
+| `prompt_meta.json` | Prompt version history index | Yes |
+| `prompt_versions/` | Historical prompt versions (v1.md, v2.md, ...) | Yes |
+| `audit.jsonl` | Append-only log of all actions applied | Yes |
+
+**Format reference:** See `config/sender-rules.example.json` and `config/custom-actions.example.json` for the expected JSON structure. Detailed format documentation is in the [Configuration Guide](docs/configuration.md).
 
 ### Data Integrity
 

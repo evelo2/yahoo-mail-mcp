@@ -1,0 +1,15 @@
+{
+  "exact": {
+    "newsletter@example.com": { "action": "subscriptions", "rule_id": "00000001" },
+    "receipts@store.example.com": { "action": "invoice", "rule_id": "00000002" },
+    "noreply@bank.example.com": { "action": "important", "rule_id": "00000003" }
+  },
+  "regex": [
+    {
+      "rule_id": "00000004",
+      "pattern": "@.*example\\.com$",
+      "action": "subscriptions",
+      "description": "All example.com domains"
+    }
+  ]
+}
