@@ -1,0 +1,38 @@
+sequenceDiagram
+    participant C as Claude
+    participant S as MCP Server
+    participant I as Yahoo IMAP
+
+    C->>S: apply_action(action, uid[], source_folder)
+
+    S->>S: Resolve source_folder<br/>(default: "INBOX")
+    S->>S: Look up action in action table
+
+    alt Action not found
+        S-->>C: Error: InvalidActionError
+    end
+
+    S->>I: Acquire mailbox lock on source_folder
+
+    loop For each UID in batch
+        S->>I: FETCH uid from source_folder (uid: true)
+
+        alt UID not found
+            S->>S: Record error for this UID
+        else UID found
+            alt Action has folder (move target)
+                S->>I: messageFlagsAdd(\\Seen) if mark_read
+                S->>I: messageFlagsAdd(\\Flagged) if flag
+                S->>I: messageMove(uid, action.folder)
+            else No folder (stays in place)
+                S->>I: messageFlagsAdd(\\Seen) if mark_read
+                S->>I: messageFlagsAdd(\\Flagged) if flag
+            end
+            S->>S: Log to audit.jsonl
+        end
+    end
+
+    S->>I: Release mailbox lock
+    S-->>C: { applied: N, errors: M, results[] }
+
+    Note over C,S: Max 20 UIDs per call to avoid timeout

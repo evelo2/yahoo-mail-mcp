@@ -4,6 +4,23 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
+## 2026-03-26 — Documentation Audit and Mermaid Diagram Suite
+
+### Added
+- **Mermaid diagram source files** for key MCP flows (see `docs/diagrams/`): session setup, email triage, rule classification, TTL expiry, apply_action, architecture overview
+- **`docs/ACTIONS.md`** — Complete reference for all 23 actions with folders, mark_read, flag, important TTL settings, and transactional vs marketing guidance
+- **`AUDIT_FINDINGS.md`** — Structured documentation gap report (6 stale, 12 missing, 18 confirmed correct)
+- **README updated** with architecture overview, actions reference, and diagram index in documentation table
+- **`process_ttl_expirations`** added to `docs/mcp-tools-reference.md` (was missing since tool was added)
+
+### Changed
+- **`docs/architecture.md`** rewritten with current source structure (24 tools, prompt manager, TTL store, audit log), data store schemas, action model with `important` modifier, rule model with `important`/`important_ttl_days`, and startup sequence including TTL initialization
+- **`docs/mcp-tools-reference.md`** tool count corrected from 23 to 24, ToC updated, full `process_ttl_expirations` section added
+
+### No functional changes.
+
+---
+
 ## 2026-03-26 — `important` Boolean Modifier with TTL on Rules
 
 ### Added

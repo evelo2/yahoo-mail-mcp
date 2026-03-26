@@ -1,0 +1,65 @@
+graph LR
+    subgraph Client["Claude (AI Client)"]
+        CD[Claude Desktop]
+        CC[Claude Code]
+    end
+
+    subgraph Transport["MCP Transport"]
+        STDIO[stdio<br/>stdin/stdout]
+        HTTP[HTTP/SSE<br/>Express 5]
+    end
+
+    subgraph Server["Yahoo Mail MCP Server"]
+        subgraph Tools["Tool Router (24 tools)"]
+            EMAIL[Email Ops<br/>list_inbox, get_email,<br/>apply_action, process_email,<br/>process_known_senders,<br/>list_folder_emails]
+            CLASS[Classification<br/>lookup_sender,<br/>classify_sender,<br/>classify_senders]
+            RULES[Rule Mgmt<br/>add_regex_rule,<br/>remove_rule, list_rules,<br/>evaluate_regex]
+            ACTIONS[Action Mgmt<br/>add_action,<br/>get_actions]
+            SYSTEM[System Ops<br/>ensure_folders,<br/>run_summary,<br/>health_check]
+            TTL[TTL Mgmt<br/>process_ttl_expirations]
+            PROMPT[Prompt Mgmt<br/>get/update/list/<br/>rollback_prompt]
+        end
+
+        subgraph Engine["Rules Engine"]
+            EXACT[Exact Rules<br/>Map lookup O1]
+            REGEX[Regex Rules<br/>Ordered, first match]
+            CACHE[Regex Cache<br/>LRU, max 500]
+        end
+
+        subgraph IMAP["IMAP Client"]
+            CONN[imapflow<br/>Singleton + reconnect]
+            LOCK[Mailbox Locks<br/>Per-operation]
+        end
+
+        subgraph Data["Data Stores"]
+            SR[sender-rules.json<br/>Exact + regex rules]
+            CA[custom-actions.json<br/>User-defined actions]
+            TTLF[ttl_records.json<br/>Important holds]
+            PM[prompt.md<br/>+ versions/]
+            AL[audit.jsonl<br/>Action log]
+        end
+    end
+
+    subgraph Yahoo["Yahoo Mail"]
+        YIMAP[IMAP Server<br/>imap.mail.yahoo.com:993<br/>TLS]
+    end
+
+    CD --> STDIO
+    CC --> STDIO
+    CD -.-> HTTP
+    STDIO --> Tools
+    HTTP --> Tools
+
+    Tools --> Engine
+    Tools --> IMAP
+    Tools --> Data
+    Engine --> Data
+
+    IMAP -->|TLS :993| YIMAP
+
+    EXACT --> REGEX
+    REGEX --> CACHE
+
+    style Client fill:#e8f4f8,stroke:#0077b6
+    style Server fill:#f8f9fa,stroke:#495057
+    style Yahoo fill:#fff3cd,stroke:#ffc107

@@ -1,0 +1,40 @@
+sequenceDiagram
+    participant C as Claude
+    participant U as User
+    participant S as MCP Server
+
+    Note over C,U: Unknown senders from process_known_senders
+
+    C->>U: Present unknown senders table<br/>(from_address, from_name, subject)
+    U->>C: Confirm/adjust classifications
+
+    Note over C,S: Domain Consolidation Check
+
+    loop For each unknown sender domain
+        C->>S: list_rules(search: "domain.com")
+        S-->>C: Existing rules for this domain
+
+        alt 2+ senders, same domain, same action
+            C->>S: evaluate_regex(pattern, action)
+            S-->>C: { rule_matches, conflicts, inbox_sample }
+            C->>S: add_regex_rule(pattern, action, description)
+            S-->>C: { rule_id, pattern, action }
+            C->>S: remove_rule(rule_id) × N
+            Note over C,S: Remove superseded exact rules
+        else Different actions for same domain
+            Note over C: Add as exact rule<br/>Note fragmentation for user
+        else Regex already covers domain
+            Note over C: Confirm with user<br/>before adding redundant rule
+        end
+    end
+
+    Note over C,S: Bulk Classification
+
+    C->>S: classify_senders([...classifications])
+    S-->>C: { saved: N, failed: [], total_rules }
+
+    Note over C,S: Reprocess Newly Classified
+
+    C->>S: process_known_senders(date range)
+    S-->>C: { known_processed, unknown_senders[] }
+    Note over C: Repeat until no unknowns remain

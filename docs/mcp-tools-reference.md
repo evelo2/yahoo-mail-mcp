@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-This document covers all 23 MCP-exposed tools: their parameters, internal flow logic, return types, and error conditions.
+This document covers all 24 MCP-exposed tools: their parameters, internal flow logic, return types, and error conditions.
 
 All tools return JSON via `{ content: [{ type: "text", text: "<json>" }] }`. On error, responses include `isError: true` with a `{ success: false, error: "<message>" }` payload.
 
@@ -31,6 +31,8 @@ All tools return JSON via `{ content: [{ type: "text", text: "<json>" }] }`. On 
   - [ensure_folders](#ensure_folders)
   - [get_run_summary](#get_run_summary)
   - [health_check](#health_check)
+- [TTL Management](#ttl-management)
+  - [process_ttl_expirations](#process_ttl_expirations)
 - [Prompt Management](#prompt-management)
   - [get_prompt](#get_prompt)
   - [update_prompt](#update_prompt)
@@ -1313,3 +1315,55 @@ Restore a previous version as the new current prompt. The rollback is recorded a
   "error": "Already on version 5"
 }
 ```
+
+---
+
+## TTL Management
+
+### `process_ttl_expirations`
+
+Check inbox for important-flagged emails past their TTL and route them to their action folders. Called during session setup to sweep expired holds.
+
+#### Parameters
+
+None.
+
+#### Flow Logic
+
+```
+1. Load all TTL records from config/ttl_records.json
+2. Filter records where expires_at <= now
+3. For each expired record:
+   a. Check if UID still exists in INBOX
+   b. If not found (orphan): prune TTL record, increment orphaned count
+   c. If found:
+      - Look up action definition
+      - Remove \Flagged flag from email
+      - Apply action (mark_read if applicable, move to action folder)
+      - Prune TTL record
+      - Increment moved count
+4. Save updated ttl_records.json
+5. Return summary
+```
+
+#### Response
+
+```json
+{
+  "checked": 5,
+  "moved": 3,
+  "orphaned": 1
+}
+```
+
+| Field | Description |
+|---|---|
+| `checked` | Total expired TTL records found |
+| `moved` | Emails successfully unflagged and moved to action folder |
+| `orphaned` | Records where the UID was no longer in INBOX (pruned without error) |
+
+#### Notes
+
+- Non-expired TTL records are left untouched
+- If no TTL records exist, returns `{ checked: 0, moved: 0, orphaned: 0 }`
+- Orphans occur when an email is manually moved or deleted before its TTL expires

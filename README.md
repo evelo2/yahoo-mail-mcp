@@ -174,9 +174,23 @@ Add to your Claude Desktop MCP configuration:
 
 | Document | Description |
 |---|---|
+| [Architecture](docs/architecture.md) | System design, components, data stores, action/rule model, TTL system |
+| [Actions Reference](docs/ACTIONS.md) | Complete reference for all 23 actions with folders, flags, and TTL settings |
 | [MCP Tools Reference](docs/mcp-tools-reference.md) | Detailed parameter specs, flow logic, and return types for all 24 tools |
 | [Configuration Guide](docs/configuration.md) | Sender rules, custom actions, and environment variables |
-| [Architecture](docs/architecture.md) | System design, IMAP integration, processing pipeline |
+
+### Diagrams
+
+Mermaid diagrams for key processing flows are in [`docs/diagrams/`](docs/diagrams/). These render natively on GitHub.
+
+| Diagram | Description |
+|---|---|
+| [Session Setup](docs/diagrams/01_session_setup.mermaid) | Full session startup sequence (health check → alert cleanup → TTL sweep → processing) |
+| [Email Triage](docs/diagrams/02_email_triage.mermaid) | How a single email is processed (exact → regex → unknown, with important modifier) |
+| [Rule Classification](docs/diagrams/03_rule_classification.mermaid) | Unknown sender classification with domain consolidation |
+| [TTL Expiry](docs/diagrams/04_ttl_expiry.mermaid) | Important-held email expiry and routing |
+| [apply_action](docs/diagrams/05_apply_action.mermaid) | Batch apply_action with source_folder |
+| [Architecture](docs/diagrams/06_architecture.mermaid) | Component overview diagram |
 
 ## Built-In Actions
 

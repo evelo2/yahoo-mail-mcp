@@ -1,0 +1,28 @@
+flowchart TD
+    A[process_ttl_expirations called] --> B[Load all TTL records<br/>from ttl_records.json]
+    B --> C{Any records?}
+    C -->|No| D[Return<br/>checked: 0, moved: 0, orphaned: 0]
+    C -->|Yes| E[Filter records where<br/>expires_at ≤ now]
+
+    E --> F{Any expired?}
+    F -->|No| G[Return<br/>checked: N, moved: 0, orphaned: 0]
+    F -->|Yes| H[For each expired record]
+
+    H --> I{UID still in<br/>INBOX?}
+    I -->|Not found| J[Orphan: prune<br/>TTL record only]
+    I -->|Found| K[Look up action definition]
+
+    K --> L[Unflag email<br/>remove ★]
+    L --> M[Apply action:<br/>mark_read + move to folder]
+    M --> N[Prune TTL record]
+
+    J --> O{More expired<br/>records?}
+    N --> O
+    O -->|Yes| H
+    O -->|No| P[Save updated<br/>ttl_records.json]
+    P --> Q[Return<br/>checked, moved, orphaned]
+
+    style D fill:#f8f9fa,stroke:#6c757d
+    style G fill:#f8f9fa,stroke:#6c757d
+    style J fill:#fff3cd,stroke:#ffc107
+    style Q fill:#d4edda,stroke:#28a745

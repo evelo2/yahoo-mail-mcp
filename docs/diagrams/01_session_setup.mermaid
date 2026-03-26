@@ -1,0 +1,47 @@
+sequenceDiagram
+    participant C as Claude (AI Client)
+    participant S as MCP Server
+    participant I as Yahoo IMAP
+
+    Note over C,S: Session Startup
+
+    C->>S: health_check
+    S->>I: Connect + INBOX access
+    S-->>C: { healthy: true, checks: {...} }
+
+    C->>S: get_actions
+    S-->>C: { actions: [...], total: 23 }
+
+    C->>S: ensure_folders
+    S->>I: Create missing folders
+    S-->>C: { created: [...], present: [...] }
+
+    Note over C,S: Alert Cleanup (sweep stale alerts)
+
+    C->>S: list_folder_emails("Alerts", before: 3d ago)
+    S->>I: SEARCH Alerts folder
+    S-->>C: [{ uid, subject, ... }, ...]
+
+    loop Batch delete (chunks of 20)
+        C->>S: apply_action("delete", uids[], "Alerts")
+        S->>I: Move to for-delete, mark read
+        S-->>C: { applied: N }
+    end
+
+    Note over C,S: TTL Expiry Sweep
+
+    C->>S: process_ttl_expirations
+    S->>S: Load TTL records (expires_at <= now)
+    S->>I: Check UIDs still in INBOX
+    S->>I: Unflag + move expired to action folders
+    S->>S: Prune TTL records
+    S-->>C: { checked, moved, orphaned }
+
+    Note over C,S: Main Processing
+
+    C->>S: process_known_senders(date range)
+    S->>I: Fetch INBOX in batches of 50
+    S->>S: Lookup each sender (exact → regex)
+    S->>I: Apply actions for known senders
+    S->>S: Hold important emails (create TTL records)
+    S-->>C: { known_processed, important_held, unknown_senders[] }

@@ -1,0 +1,25 @@
+flowchart TD
+    A[Fetch email from INBOX] --> B{Lookup sender<br/>in exact rules}
+    B -->|Match found| D{Rule has<br/>important: true?}
+    B -->|No match| C{Evaluate regex<br/>rules in order}
+    C -->|Match found| D
+    C -->|No match| E[Mark as unknown<br/>Return to Claude<br/>for classification]
+
+    D -->|No| F[Apply action immediately]
+    D -->|Yes| G[Flag email ★<br/>Create TTL record<br/>Leave in INBOX]
+
+    F --> H{Action has folder?}
+    H -->|Yes| I[Mark read if mark_read<br/>Flag if flag<br/>Move to action folder]
+    H -->|No| J[Apply flags only<br/>Stay in current folder]
+
+    G --> K[Email visible in INBOX<br/>for important_ttl_days]
+    K --> L[process_ttl_expirations<br/>runs on next session]
+    L --> M[Unflag + move to<br/>action folder]
+
+    I --> N[Email triaged ✓]
+    J --> N
+    M --> N
+
+    style E fill:#fff3cd,stroke:#ffc107
+    style G fill:#cce5ff,stroke:#007bff
+    style N fill:#d4edda,stroke:#28a745

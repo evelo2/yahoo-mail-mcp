@@ -2,42 +2,60 @@
 
 ## System Overview
 
+The Yahoo Mail MCP Server is a locally-running Node.js MCP server that proxies Yahoo Mail via IMAP using [imapflow](https://imapflow.com/). It communicates with Claude (Claude Desktop or Claude Code) over the MCP stdio transport protocol, exposing 24 tools for AI-driven email triage.
+
 ```
-┌─────────────────────┐      MCP Protocol       ┌─────────────────────────┐
-│  AI Client          │◄────────────────────────►│  Yahoo Mail MCP Server  │
-│  (Claude Desktop,   │   stdio | HTTP/SSE       │                         │
-│   Claude Code, etc) │                          │  23 tools registered    │
-└─────────────────────┘                          └───────────┬─────────────┘
-                                                             │
-                                              ┌──────────────┼──────────────┐
-                                              │              │              │
-                                         ┌────▼────┐   ┌────▼────┐   ┌────▼────┐
-                                         │  IMAP   │   │  Rules  │   │  Config │
-                                         │  Layer  │   │  Engine │   │  Files  │
-                                         └────┬────┘   └─────────┘   └─────────┘
-                                              │
-                                    TLS:993   │
-                                         ┌────▼────────────┐
-                                         │  Yahoo Mail     │
-                                         │  IMAP Server    │
-                                         └─────────────────┘
+┌─────────────────────────────────────────────┐
+│               Claude (AI Client)             │
+│         Claude Desktop / Claude Code         │
+└──────────────────┬──────────────────────────┘
+                   │ MCP stdio transport
+┌──────────────────▼──────────────────────────┐
+│            Yahoo Mail MCP Server             │
+│  ┌─────────────┐  ┌──────────────────────┐  │
+│  │ Tool Router │  │   Rules Engine        │  │
+│  │ (24 tools)  │  │ exact + regex + TTL   │  │
+│  └──────┬──────┘  └──────────┬───────────┘  │
+│         │                    │               │
+│  ┌──────▼────────────────────▼───────────┐  │
+│  │           IMAP Client (imapflow)       │  │
+│  └──────────────────┬───────────────────┘   │
+│                     │                        │
+│  ┌──────────────────▼──────────────────┐    │
+│  │         Data Stores                  │    │
+│  │  rules.json  actions.json  ttl.json  │    │
+│  │  prompt.md (versioned)  audit.jsonl  │    │
+│  └─────────────────────────────────────┘    │
+└─────────────────────┬───────────────────────┘
+                      │ IMAP / TLS :993
+┌─────────────────────▼───────────────────────┐
+│             Yahoo Mail (IMAP)                │
+└─────────────────────────────────────────────┘
 ```
+
+See [06_architecture.mermaid](diagrams/06_architecture.mermaid) for a rendered component diagram.
+
+### External Dependencies
+
+- **Yahoo IMAP** — connects to `imap.mail.yahoo.com:993` using TLS with a Yahoo App Password (not OAuth)
+- **No Cloudflare tunnel required** for stdio transport — MCP SDK handles communication over stdin/stdout
+- **HTTP transport** (optional) — runs an Express 5 server for remote clients; can be fronted by a Cloudflare tunnel if needed
 
 ## Source Structure
 
 ```
 src/
-├── index.ts              Entry point: loads config, runs preflight, starts server
-├── server.ts             Creates McpServer, registers all 23 tools
-├── preflight.ts          Startup validation (IMAP, folders, fetch test)
+├── index.ts                 Entry point: loads config, runs preflight, starts server
+├── server.ts                Creates McpServer, registers all 24 tools
+├── preflight.ts             Startup validation (IMAP, folders, fetch test)
 ├── imap/
-│   ├── client.ts         IMAP connection management (singleton, reconnect)
-│   ├── operations.ts     Core IMAP operations + action table + folder management
-│   └── types.ts          TypeScript interfaces (EmailSummary, EmailDetail, etc.)
+│   ├── client.ts            IMAP connection management (singleton, reconnect)
+│   ├── operations.ts        Core IMAP operations + action table + folder management
+│   └── types.ts             TypeScript interfaces (EmailSummary, EmailDetail, etc.)
 ├── rules/
-│   ├── config.ts         Sender rules + custom actions persistence (load/save/migrate)
-│   └── engine.ts         Sender lookup logic (exact → regex, with regex cache)
-├── tools/                One file per MCP tool handler
+│   ├── config.ts            Sender rules + custom actions persistence (load/save/migrate)
+│   └── engine.ts            Sender lookup logic (exact → regex, with regex cache)
+├── tools/                   One file per MCP tool handler
 │   ├── list-inbox.ts
 │   ├── get-email.ts
 │   ├── apply-action.ts
@@ -55,12 +73,148 @@ src/
 │   ├── get-actions.ts
 │   ├── ensure-folders.ts
 │   ├── run-summary.ts
-│   └── health-check.ts
+│   ├── health-check.ts
+│   └── process-ttl-expirations.ts
+├── prompt/
+│   └── manager.ts           Prompt versioning, history, rollback
 └── utils/
-    ├── errors.ts         Custom error classes
-    ├── logger.ts         Pino logger configuration
-    └── paths.ts          Shared config path resolution and constants
+    ├── errors.ts            Custom error classes (5 types)
+    ├── logger.ts            Pino logger configuration
+    ├── paths.ts             Shared config path resolution and constants
+    ├── ttl-store.ts         TTL record persistence for important modifier
+    ├── fs.ts                Atomic writes, backup rotation helpers
+    └── audit-log.ts         Append-only action audit log
 ```
+
+## Components
+
+### Tool Router (24 tools)
+
+Tools are grouped by category:
+
+| Category | Tools | Count |
+|---|---|---|
+| Email Operations | `list_inbox_emails`, `get_email`, `apply_action`, `process_email`, `process_known_senders`, `list_folder_emails` | 6 |
+| Sender Classification | `lookup_sender`, `classify_sender`, `classify_senders` | 3 |
+| Rule Management | `add_regex_rule`, `remove_rule`, `list_rules`, `evaluate_regex` | 4 |
+| Action Management | `add_action`, `get_actions` | 2 |
+| System Operations | `ensure_folders`, `get_run_summary`, `health_check` | 3 |
+| TTL Management | `process_ttl_expirations` | 1 |
+| Prompt Management | `get_prompt`, `update_prompt`, `list_prompt_versions`, `get_prompt_version`, `rollback_prompt` | 5 |
+
+Each tool is registered in `server.ts` with a Zod schema for input validation and a handler function. Tool handlers return `{ content: [{ type: "text", text: "<json>" }] }` on success or `{ content: [...], isError: true }` on failure.
+
+### Rules Engine
+
+The rules engine (`src/rules/engine.ts`) resolves a sender email address to an action:
+
+1. **Exact match** — O(1) Map lookup by lowercase email
+2. **Regex match** — iterate regex rules in definition order, first match wins
+3. **No match** — returns `action: "unknown"`
+
+Exact rules always take priority over regex rules. Regex patterns are compiled with case-insensitive flag and cached (LRU, max 500 entries). Invalid patterns are cached as `null` and skipped with a warning.
+
+### IMAP Client
+
+Singleton pattern with lazy reconnection via `getConnection()`. All operations use UIDs (not sequence numbers) for stability across reconnections. Mailbox locks are acquired per-operation and always released in `finally` blocks.
+
+A configurable delay (`IMAP_OP_DELAY_MS`, default 200ms) between operations prevents Yahoo rate-limiting.
+
+### Prompt Manager
+
+Manages a versioned runtime prompt (`config/prompt.md`) with full version history. Supports update, rollback, and version browsing. Each version is stored as a separate file in `config/prompt_versions/`.
+
+## Data Stores
+
+| File | Purpose | Schema | Read/Write | Auto-created? |
+|---|---|---|---|---|
+| `config/sender-rules.json` | Exact + regex sender→action rules | `{ exact: Record<email, ExactRule>, regex: RegexRule[] }` | Read at startup; written on classify/add/remove | No — copy from example |
+| `config/custom-actions.json` | User-defined action types | `Record<name, { folder, mark_read, flag }>` | Read at startup + before modification; written on `add_action` | No — copy from example |
+| `config/ttl_records.json` | Active TTL holds for important emails | `{ ttl_records: TtlRecord[] }` | Read at startup (`initTtlStore`); written on hold/expire | Yes |
+| `config/prompt.md` | Current runtime prompt content | Markdown | Read via `get_prompt`; written via `update_prompt` | Yes — default on first run |
+| `config/prompt_meta.json` | Prompt version index | `{ current_version, last_updated, versions[] }` | Read/written with prompt ops | Yes |
+| `config/prompt_versions/` | Historical prompt versions (v1.md, v2.md, ...) | Markdown files | Append-only | Yes |
+| `config/audit.jsonl` | Action audit trail | JSONL: `{ timestamp, uids[], action, source_folder, count, batch_id }` | Append-only; trimmed by retention | Yes |
+
+### Data Integrity
+
+- **Atomic writes** — all config saves use write-to-temp-then-rename (crash-safe)
+- **Backup rotation** — `sender-rules.json` keeps 5 rolling backups (`.bak.1` through `.bak.5`)
+- **Audit log** — append-only, capped at 1 MB, entries older than `AUDIT_RETENTION_DAYS` (default: 10) trimmed automatically
+
+## Action Model
+
+### Built-in vs Custom Actions
+
+- **7 built-in actions** are hardcoded in `src/imap/operations.ts` and cannot be removed: `important`, `doubleclick`, `unknown`, `invoice`, `subscriptions`, `news`, `delete`
+- **Custom actions** are defined at runtime via `add_action` and persisted to `config/custom-actions.json`
+- The merged action table is cached in memory and invalidated when custom actions change
+
+### Action Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Unique identifier (lowercase, no spaces) |
+| `folder` | string or null | Target IMAP folder. `null` means email stays in current folder |
+| `mark_read` | boolean | Whether to add `\Seen` flag |
+| `flag` | boolean | Whether to add `\Flagged` flag (star) |
+| `built_in` | boolean | Whether the action is hardcoded |
+
+See [ACTIONS.md](ACTIONS.md) for the complete reference of all 23 actions.
+
+### The `important` Modifier
+
+`important` is a **boolean flag on any rule** (exact or regex), not a standalone routing action. When a rule has `important: true`:
+
+1. **On match** — the email is flagged (`\Flagged`) and **held in INBOX** instead of being moved
+2. **TTL record created** — `{ uid, action, folder, arrived_at, expires_at }` written to `config/ttl_records.json`
+3. **TTL duration** — set by `important_ttl_days` on the rule (default: 7 days if omitted)
+4. **On expiry** — `process_ttl_expirations` sweeps the TTL store, unflags emails, and moves them to their action folder
+5. **Orphan handling** — if an email was manually moved before TTL expires, the record is pruned without error
+
+See [04_ttl_expiry.mermaid](diagrams/04_ttl_expiry.mermaid) for a visual flow.
+
+## Rule Model
+
+### Exact Rules
+
+```typescript
+interface ExactRule {
+  action: string;
+  rule_id: string;           // 8-char hex, stable across saves
+  important?: boolean;        // Hold in inbox with TTL
+  important_ttl_days?: number; // Days before routing (default: 7)
+}
+```
+
+Stored as `Map<lowercase_email, ExactRule>` in memory, serialized as a plain object in `sender-rules.json`.
+
+### Regex Rules
+
+```typescript
+interface RegexRule {
+  rule_id: string;
+  pattern: string;            // JavaScript regex syntax
+  action: string;
+  description?: string;       // Human-readable explanation
+  important?: boolean;
+  important_ttl_days?: number;
+}
+```
+
+Stored as an ordered array. Patterns validated against catastrophic backtracking (ReDoS) using `safe-regex2` before saving.
+
+### Evaluation Order
+
+1. **Exact rules first** — O(1) Map lookup by normalized (lowercase) email
+2. **Regex rules second** — iterated in definition order, first match wins
+3. **No match** — returns `action: "unknown"`, `matched: false`
+
+### Built-in Fallbacks
+
+- `unknown` — default for unclassified senders; email stays in INBOX
+- `doubleclick` — marks sender as known but takes no action
+- `important` — (deprecated as routing target) catch-all for senders without a better folder
 
 ## Startup Sequence
 
@@ -69,230 +223,64 @@ src/
 2. Load custom actions from config/custom-actions.json
 3. Load sender rules from config/sender-rules.json
    - Detect format: new structured or legacy flat
-   - If legacy: backup to sender-rules.backup.json, migrate, save new format
-4. Run preflight checks (unless SKIP_PREFLIGHT=true):
-   a. Validate YAHOO_EMAIL and YAHOO_APP_PASSWORD are set
+   - If legacy: backup → migrate → save new format
+4. Initialize TTL store from config/ttl_records.json
+5. Run preflight checks (unless SKIP_PREFLIGHT=true):
+   a. Validate YAHOO_EMAIL and YAHOO_APP_PASSWORD
    b. Connect to Yahoo IMAP, measure latency
    c. List all mailboxes
    d. Open INBOX, get message count
    e. Fetch a sample email by UID
    f. Print report, exit(1) on failure
-5. Create MCP server with 23 tools
-6. Initialize tool modules that need shared state (rules reference)
-7. Start transport:
+6. Create MCP server with 24 tools
+7. Initialize tool modules with shared state (rules reference)
+8. Start transport:
    - stdio: connect StdioServerTransport
    - http: start Express server with session management
-8. Register SIGINT/SIGTERM handlers for clean shutdown
+9. Register SIGINT/SIGTERM handlers for clean shutdown
 ```
 
-## IMAP Integration
-
-### Connection Management
-
-The IMAP layer uses a **singleton pattern** with lazy reconnection:
-
-- `getConnection()` returns the existing `ImapFlow` client if it's still usable
-- If the client is null or disconnected, a new connection is established
-- The client config is cached after first use
-- `closeConnection()` performs a clean IMAP LOGOUT
-
-### UID-Based Operations
-
-All IMAP operations use **UIDs** (not sequence numbers). This is critical because:
-
-- UIDs are persistent across reconnections
-- Sequence numbers can shift when other emails are deleted/moved
-- Every `fetch`, `fetchOne`, `messageFlagsAdd`, and `messageMove` call passes `{ uid: true }`
-
-### Mailbox Locking
-
-Operations that read or modify the INBOX acquire a **mailbox lock** via `client.getMailboxLock('INBOX')`. The lock is always released in a `finally` block to prevent deadlocks.
-
-### Rate Limiting
-
-Yahoo's IMAP server can reject rapid-fire operations. The server introduces a configurable delay (`IMAP_OP_DELAY_MS`, default 200ms) between:
-- Flag operations (`\Seen`, `\Flagged`)
-- Move operations
-- Folder creation during `ensure_folders`
-
-### Folder Caching
-
-A `knownFolders` Set caches which IMAP folders exist:
-- Populated on first `ensureFolderExists()` call via a full LIST
-- Updated when folders are created
-- Avoids repeated IMAP LIST calls during batch processing
-- Cleared on server restart
-
-## Rules Engine
-
-### Data Model
-
-```
-Exact Rules (Map<string, ExactRule>)
-┌─────────────────────────┬───────────────┬──────────┐
-│ email (lowercase)       │ action        │ rule_id  │
-├─────────────────────────┼───────────────┼──────────┤
-│ newsletter@example.com  │ subscriptions │ a1b2c3d4 │
-│ billing@company.com     │ invoice       │ e5f6a7b8 │
-│ boss@work.com           │ important     │ c9d0e1f2 │
-└─────────────────────────┴───────────────┴──────────┘
-
-Regex Rules (RegexRule[])  — ordered, first match wins
-┌──────────┬──────────────────────────────┬───────────────┬────────────────────┐
-│ rule_id  │ pattern                      │ action        │ description        │
-├──────────┼──────────────────────────────┼───────────────┼────────────────────┤
-│ aabbccdd │ @marketing\.example\.com$    │ subscriptions │ Marketing emails   │
-│ eeff0011 │ noreply@.*\.example\.com$    │ delete        │ No-reply addresses │
-└──────────┴──────────────────────────────┴───────────────┴────────────────────┘
-
-Action Table (Record<string, ActionDef>)
-┌───────────────┬──────────────┬──────────┬──────┬──────────┐
-│ name          │ moveToFolder │ markRead │ flag │ builtIn  │
-├───────────────┼──────────────┼──────────┼──────┼──────────┤
-│ important     │ (none)       │ false    │ true │ true     │
-│ doubleclick   │ (none)       │ false    │ false│ true     │
-│ unknown       │ (none)       │ false    │ false│ true     │
-│ subscriptions │ subscriptions│ true     │ false│ true     │
-│ receipts      │ receipts     │ true     │ false│ false    │
-└───────────────┴──────────────┴──────────┴──────┴──────────┘
-
-Actions with `moveToFolder: undefined` leave emails in INBOX. Only flag/markRead operations are applied.
-```
-
-### Lookup Flow
-
-1. Normalize sender email to lowercase
-2. **Exact match**: Check if email exists in the exact rules Map
-   - If found: return `matched: true`, `match_type: "exact"`, `rule_id`
-3. **Regex match**: Iterate regex rules in definition order
-   - Compile pattern (cached in `regexCache`) with case-insensitive flag
-   - If pattern matches: return `matched: true`, `match_type: "regex"`, `matched_pattern`, `rule_id`
-4. If no match: return `matched: false`, `action: "unknown"`
-
-Exact rules always take priority over regex rules. This prevents broad patterns from accidentally overriding specific sender classifications.
-
-### Regex Cache
-
-Compiled `RegExp` objects are cached in a `Map<string, RegExp | null>` to avoid recompilation on every lookup. Invalid patterns are cached as `null` and silently skipped during matching (with a warning logged). The cache is cleared when regex rules are added or removed.
-
-### Persistence
-
-- **Sender rules**: `config/sender-rules.json` - loaded at startup, saved on every classify/regex rule operation. Uses the structured `{ exact: {...}, regex: [...] }` format with `rule_id` on every rule.
-- **Custom actions**: `config/custom-actions.json` - loaded at startup, saved when new actions are added
-- Both files use atomic full-file writes (`writeFileSync`)
-- **Legacy migration**: On first load of a flat-format rules file, a backup is created at `config/sender-rules.backup.json` and the file is rewritten in the new structured format.
+See [01_session_setup.mermaid](diagrams/01_session_setup.mermaid) for the AI session startup flow (distinct from server startup).
 
 ## Transport Modes
 
 ### Stdio (Default)
 
-Used by Claude Desktop and Claude Code. Communication happens over standard input/output.
-
-```
-Client ──stdin──► MCP Server
-Client ◄─stdout── MCP Server
-```
-
-Single server instance per connection. No session management needed.
+Used by Claude Desktop and Claude Code. Communication over stdin/stdout. Single server instance per connection.
 
 ### HTTP
 
-Used for remote or multi-client access. Runs an Express 5 server.
+Used for remote or multi-client access via Express 5:
+- `POST /mcp` — MCP JSON-RPC requests
+- `GET /mcp` — SSE stream for server-to-client messages
+- `DELETE /mcp` — terminate session
+- `GET /health` — simple health check
 
-```
-Endpoints:
-  POST   /mcp    → Handle MCP JSON-RPC requests
-  GET    /mcp    → SSE stream for server-to-client messages
-  DELETE /mcp    → Terminate a session
-  GET    /health → Simple health check ({ status: "ok", sessions: N })
-```
-
-**Session management:**
-- Each new POST creates a session with a UUID
-- Session ID returned in `mcp-session-id` header
-- Subsequent requests include this header to reuse the session
-- Each session gets its own `StreamableHTTPServerTransport` and `McpServer` instance
-- Sessions are cleaned up when the transport closes
+Session management via UUID in `mcp-session-id` header. Security: Helmet, rate limiting, CORS, optional API key auth.
 
 ## Error Handling
 
-### Custom Error Classes
+| Error Class | Use Case |
+|---|---|
+| `ImapConnectionError` | IMAP connection failures |
+| `AuthenticationError` | Yahoo auth failures |
+| `EmailNotFoundError` | UID not found in specified folder |
+| `InvalidActionError` | Action name not in action table |
+| `ConfigError` | Config file I/O or parse errors |
 
-| Class | Use Case | Extra Properties |
-|---|---|---|
-| `ImapConnectionError` | IMAP connection failures | — |
-| `AuthenticationError` | Yahoo auth failures | Default message with guidance |
-| `EmailNotFoundError` | UID not in INBOX | `uid: number` |
-| `InvalidActionError` | Action name not in table | `action: string` |
-| `ConfigError` | Config file I/O or parse errors | — |
+Each tool handler wraps logic in try/catch, returning structured JSON on success or `{ success: false, error: "..." }` with `isError: true` on failure.
 
-### Error Propagation
+## Diagrams
 
-Each MCP tool handler wraps its logic in try/catch:
-- On success: returns `{ content: [{ type: "text", text: "<json>" }] }`
-- On error: returns `{ content: [{ type: "text", text: "<error json>" }], isError: true }`
+Visual documentation is available in [`docs/diagrams/`](diagrams/):
 
-Error responses have the shape:
-```json
-{ "success": false, "error": "Human-readable error message" }
-```
+| Diagram | Description |
+|---|---|
+| [01_session_setup.mermaid](diagrams/01_session_setup.mermaid) | Session startup sequence |
+| [02_email_triage.mermaid](diagrams/02_email_triage.mermaid) | Email triage flowchart |
+| [03_rule_classification.mermaid](diagrams/03_rule_classification.mermaid) | Unknown sender classification flow |
+| [04_ttl_expiry.mermaid](diagrams/04_ttl_expiry.mermaid) | TTL expiry processing |
+| [05_apply_action.mermaid](diagrams/05_apply_action.mermaid) | apply_action with source_folder |
+| [06_architecture.mermaid](diagrams/06_architecture.mermaid) | Component overview |
 
-## Processing Pipeline
-
-### Typical Triage Session
-
-```
-┌──────────────┐     ┌──────────────────────┐     ┌───────────────────┐
-│ health_check │────►│ process_known_senders │────►│ Review unknowns   │
-│              │     │                      │     │ from response     │
-└──────────────┘     └──────────┬───────────┘     └────────┬──────────┘
-                                │                          │
-                    ┌───────────▼──────────┐    ┌──────────▼──────────┐
-                    │ Known senders auto-  │    │ classify_senders    │
-                    │ triaged to folders   │    │ (bulk classify)     │
-                    └──────────────────────┘    └──────────┬──────────┘
-                                                           │
-                                               ┌───────────▼──────────┐
-                                               │ process_known_senders│
-                                               │ (second pass)        │
-                                               └──────────────────────┘
-                                                           │
-                                                    ┌──────▼──────┐
-                                                    │ Inbox empty │
-                                                    └─────────────┘
-```
-
-1. **health_check** - Verify IMAP connectivity and configuration
-2. **process_known_senders** - Auto-triage all emails from known senders; returns list of unknown senders
-3. **classify_senders** - AI or user classifies the unknown senders with appropriate actions
-4. **process_known_senders** - Second pass picks up newly classified senders
-5. Repeat until no unknowns remain
-
-### Batch Processing Internals
-
-`process_known_senders` processes the inbox in batches to handle large mailboxes:
-
-```
-BATCH 1: Fetch 50 emails → apply known → collect unknown
-BATCH 2: Fetch 50 more (excluding already-seen UIDs) → apply → collect
-BATCH 3: ...
-...
-EXIT when: 50 unique unknowns collected OR inbox exhausted OR 20 batches (1000 emails)
-```
-
-The `actions_filter` parameter allows selective processing. For example, `actions_filter: ["delete"]` processes only emails from senders classified as "delete", leaving everything else untouched. This is useful for targeted cleanup passes.
-
-## Logging
-
-Uses Pino for structured JSON logging to stderr:
-
-```json
-{"level":30,"time":1710500000000,"msg":"Action applied","uid":12345,"action":"subscriptions","operations":["marked_read","moved_to_subscriptions"]}
-```
-
-Log level is controlled by `LOG_LEVEL` environment variable. Key events logged:
-- IMAP connection established/lost
-- Sender rules saved (with count)
-- Actions applied (with UID, action, operations)
-- Batch processing summaries
-- Errors with full context
+These render natively in GitHub, GitLab, and VS Code (with the Markdown Preview Mermaid Support extension).
