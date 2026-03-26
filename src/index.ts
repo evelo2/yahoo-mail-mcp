@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { loadSenderRules, loadCustomActions } from './rules/config.js';
 import { initPromptManager } from './prompt/manager.js';
 import { initAuditLog } from './utils/audit-log.js';
+import { initTtlStore } from './utils/ttl-store.js';
 import { createServer } from './server.js';
 import { logger } from './utils/logger.js';
 import { getRulesConfigPath, getActionsConfigPath, getPromptDir } from './utils/paths.js';
@@ -32,8 +33,9 @@ async function main() {
   // Initialize prompt manager (creates default prompt.md on first run)
   initPromptManager(getPromptDir());
 
-  // Initialize audit log
+  // Initialize audit log and TTL store
   initAuditLog(getPromptDir());
+  initTtlStore(getPromptDir());
 
   // Run preflight checks — connect to Yahoo, enumerate inbox & folders
   const skipPreflight = process.env.SKIP_PREFLIGHT === 'true';

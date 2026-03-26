@@ -18,6 +18,8 @@ export type Action = string;
 export interface ExactRule {
   action: string;
   rule_id: string;
+  important?: boolean;
+  important_ttl_days?: number;
 }
 
 export interface RegexRule {
@@ -25,6 +27,8 @@ export interface RegexRule {
   pattern: string;
   action: string;
   description?: string;
+  important?: boolean;
+  important_ttl_days?: number;
 }
 
 export interface SenderRules {
@@ -35,8 +39,8 @@ export interface SenderRules {
 
 // On-disk JSON format
 interface SenderRulesJSON {
-  exact: Record<string, { action: string; rule_id: string }>;
-  regex: Array<{ rule_id: string; pattern: string; action: string; description?: string }>;
+  exact: Record<string, { action: string; rule_id: string; important?: boolean; important_ttl_days?: number }>;
+  regex: Array<{ rule_id: string; pattern: string; action: string; description?: string; important?: boolean; important_ttl_days?: number }>;
 }
 
 // ── ID generation ──
@@ -83,10 +87,12 @@ export function loadSenderRules(configPath: string): SenderRules {
   if (isNewFormat(parsed)) {
     // New structured format
     for (const [email, entry] of Object.entries(parsed.exact)) {
-      const rule = entry as { action: string; rule_id?: string };
+      const rule = entry as { action: string; rule_id?: string; important?: boolean; important_ttl_days?: number };
       rules.exact.set(email.toLowerCase(), {
         action: rule.action,
         rule_id: rule.rule_id || generateRuleId(),
+        ...(rule.important ? { important: true } : {}),
+        ...(rule.important_ttl_days != null ? { important_ttl_days: rule.important_ttl_days } : {}),
       });
     }
     if (Array.isArray(parsed.regex)) {
@@ -96,6 +102,8 @@ export function loadSenderRules(configPath: string): SenderRules {
           pattern: r.pattern,
           action: r.action,
           description: r.description,
+          ...(r.important ? { important: true } : {}),
+          ...(r.important_ttl_days != null ? { important_ttl_days: r.important_ttl_days } : {}),
         });
       }
     }
@@ -128,9 +136,14 @@ export function loadSenderRules(configPath: string): SenderRules {
 }
 
 export function saveSenderRules(rules: SenderRules): void {
-  const exactObj: Record<string, { action: string; rule_id: string }> = {};
+  const exactObj: SenderRulesJSON['exact'] = {};
   for (const [email, rule] of rules.exact) {
-    exactObj[email] = { action: rule.action, rule_id: rule.rule_id };
+    exactObj[email] = {
+      action: rule.action,
+      rule_id: rule.rule_id,
+      ...(rule.important ? { important: true } : {}),
+      ...(rule.important_ttl_days != null ? { important_ttl_days: rule.important_ttl_days } : {}),
+    };
   }
 
   const json: SenderRulesJSON = {
@@ -140,6 +153,8 @@ export function saveSenderRules(rules: SenderRules): void {
       pattern: r.pattern,
       action: r.action,
       ...(r.description ? { description: r.description } : {}),
+      ...(r.important ? { important: true } : {}),
+      ...(r.important_ttl_days != null ? { important_ttl_days: r.important_ttl_days } : {}),
     })),
   };
 
@@ -163,6 +178,7 @@ export function addRegexRule(
   pattern: string,
   action: string,
   description?: string,
+  options?: { important?: boolean; important_ttl_days?: number },
 ): RegexRule {
   // Validate regex compiles
   try {
@@ -187,6 +203,8 @@ export function addRegexRule(
     pattern,
     action: action.toLowerCase(),
     description,
+    ...(options?.important ? { important: true } : {}),
+    ...(options?.important_ttl_days != null ? { important_ttl_days: options.important_ttl_days } : {}),
   };
 
   rules.regex.push(rule);

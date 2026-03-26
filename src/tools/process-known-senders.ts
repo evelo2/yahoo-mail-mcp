@@ -1,7 +1,9 @@
 import type { SenderRules } from '../rules/config.js';
 import { lookupSender } from '../rules/engine.js';
 import { getConnection } from '../imap/client.js';
-import { listInboxEmails, applyActionsBatch } from '../imap/operations.js';
+import { listInboxEmails, applyActionsBatch, getActionTable } from '../imap/operations.js';
+import { addTtlRecord } from '../utils/ttl-store.js';
+import { delay } from '../imap/client.js';
 import { logger } from '../utils/logger.js';
 
 const BATCH_SIZE = 50;
@@ -24,6 +26,7 @@ interface UnknownSender {
 interface ProcessKnownSendersResult {
   total_fetched: number;
   known_processed: number;
+  important_held: number;
   known_filtered_out: number;
   unknown_skipped: number;
   errors: number;
@@ -47,10 +50,13 @@ export async function handleProcessKnownSenders(params: {
   const seenUids = new Set<number>();
   const actionsSummary: Record<string, number> = {};
   let knownProcessed = 0;
+  let importantHeld = 0;
   let filteredOutCount = 0;
   let errors = 0;
   let totalFetched = 0;
   let batches = 0;
+
+  const actionTable = getActionTable();
 
   // Loop: fetch batches until we have enough unique unknown senders, inbox is exhausted, or max batches reached
   while (unknownAddresses.size < UNKNOWN_LIMIT && batches < MAX_BATCHES) {
@@ -68,6 +74,7 @@ export async function handleProcessKnownSenders(params: {
 
     // Scan batch: classify each email, collect actions to apply
     const pendingActions: Array<{ uid: number; action: string }> = [];
+    const pendingImportant: Array<{ uid: number; action: string; ttlDays: number; date: string }> = [];
 
     for (const email of emails) {
       seenUids.add(email.uid);
@@ -93,10 +100,21 @@ export async function handleProcessKnownSenders(params: {
         continue;
       }
 
+      // Check if this is an important-flagged rule — hold in inbox instead of routing
+      if (lookup.important) {
+        pendingImportant.push({
+          uid: email.uid,
+          action: lookup.action,
+          ttlDays: lookup.important_ttl_days ?? 7,
+          date: email.date,
+        });
+        continue;
+      }
+
       pendingActions.push({ uid: email.uid, action: lookup.action });
     }
 
-    // Batch-apply all actions at once (single INBOX lock, bulk IMAP ops)
+    // Batch-apply non-important actions (single INBOX lock, bulk IMAP ops)
     if (pendingActions.length > 0) {
       const batchResult = await applyActionsBatch(client, pendingActions);
       knownProcessed += batchResult.applied;
@@ -105,13 +123,51 @@ export async function handleProcessKnownSenders(params: {
         actionsSummary[action] = (actionsSummary[action] || 0) + count;
       }
     }
+
+    // Handle important holds: flag in inbox + write TTL records
+    if (pendingImportant.length > 0) {
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        const importantUidRange = pendingImportant.map(p => p.uid).join(',');
+        await client.messageFlagsAdd(importantUidRange as any, ['\\Flagged'], { uid: true } as any);
+        await delay();
+      } catch (err) {
+        logger.error({ err }, 'Failed to flag important emails');
+        errors += pendingImportant.length;
+      } finally {
+        lock.release();
+      }
+
+      // Write TTL records
+      for (const item of pendingImportant) {
+        const def = actionTable[item.action];
+        const arrivedAt = item.date || new Date().toISOString();
+        const expiresAt = new Date(new Date(arrivedAt).getTime() + item.ttlDays * 24 * 60 * 60 * 1000).toISOString();
+
+        addTtlRecord({
+          uid: item.uid,
+          action: item.action,
+          folder: def?.moveToFolder ?? item.action,
+          arrived_at: arrivedAt,
+          expires_at: expiresAt,
+        });
+      }
+
+      importantHeld += pendingImportant.length;
+    }
   }
 
   const unknownSenders = [...unknownAddresses.values()];
 
+  // Include important_held in summary
+  if (importantHeld > 0) {
+    actionsSummary['important_held'] = (actionsSummary['important_held'] || 0) + importantHeld;
+  }
+
   logger.info({
     total: totalFetched,
     known: knownProcessed,
+    importantHeld,
     filteredOut: filteredOutCount,
     unknown: unknownSenders.length,
     errors,
@@ -122,6 +178,7 @@ export async function handleProcessKnownSenders(params: {
   return {
     total_fetched: totalFetched,
     known_processed: knownProcessed,
+    important_held: importantHeld,
     known_filtered_out: filteredOutCount,
     unknown_skipped: unknownSenders.length,
     errors,

@@ -1,6 +1,6 @@
 # Yahoo Mail MCP Server
 
-An MCP (Model Context Protocol) server that proxies Yahoo Mail IMAP access for AI-driven email triage. It exposes 23 tools that allow an AI assistant to list, read, classify, and batch-process emails using a rules-based sender classification system with support for both exact-match and regex pattern rules.
+An MCP (Model Context Protocol) server that proxies Yahoo Mail IMAP access for AI-driven email triage. It exposes 24 tools that allow an AI assistant to list, read, classify, and batch-process emails using a rules-based sender classification system with support for both exact-match and regex pattern rules.
 
 ## How It Works
 
@@ -39,6 +39,7 @@ Emails sitting in your INBOX are considered **unprocessed**. The server maintain
 | `list_prompt_versions` | Browse prompt version history |
 | `get_prompt_version` | Retrieve a specific historical prompt version |
 | `rollback_prompt` | Restore a previous prompt version |
+| `process_ttl_expirations` | Sweep inbox for expired important-held emails |
 
 ## Quick Start
 
@@ -173,7 +174,7 @@ Add to your Claude Desktop MCP configuration:
 
 | Document | Description |
 |---|---|
-| [MCP Tools Reference](docs/mcp-tools-reference.md) | Detailed parameter specs, flow logic, and return types for all 23 tools |
+| [MCP Tools Reference](docs/mcp-tools-reference.md) | Detailed parameter specs, flow logic, and return types for all 24 tools |
 | [Configuration Guide](docs/configuration.md) | Sender rules, custom actions, and environment variables |
 | [Architecture](docs/architecture.md) | System design, IMAP integration, processing pipeline |
 

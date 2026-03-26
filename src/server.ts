@@ -19,6 +19,7 @@ import { handleRemoveRule, initRemoveRule } from './tools/remove-rule.js';
 import { handleListRules, initListRules } from './tools/list-rules.js';
 import { handleListFolderEmails } from './tools/list-folder-emails.js';
 import { handleEvaluateRegex, initEvaluateRegex } from './tools/evaluate-regex.js';
+import { handleProcessTtlExpirations } from './tools/process-ttl-expirations.js';
 import {
   getPrompt,
   updatePrompt,
@@ -170,6 +171,8 @@ export function createServer(rules: SenderRules): McpServer {
     {
       email_address: zEmail,
       action: z.string().describe('The action to assign (must be a valid action name)'),
+      important: z.boolean().optional().describe('When true, email is held in inbox flagged for TTL duration before routing to action folder'),
+      important_ttl_days: z.number().int().min(1).optional().describe('Days to hold in inbox when important (default: 7)'),
     },
     async (params) => {
       try {
@@ -188,6 +191,8 @@ export function createServer(rules: SenderRules): McpServer {
       classifications: z.array(z.object({
         email_address: z.string().describe('The sender email address'),
         action: z.string().describe('The action to assign'),
+        important: z.boolean().optional().describe('When true, hold in inbox flagged for TTL duration'),
+        important_ttl_days: z.number().int().min(1).optional().describe('Days to hold when important (default: 7)'),
       })).describe('Array of sender-to-action classifications'),
     },
     async (params) => {
@@ -272,6 +277,8 @@ export function createServer(rules: SenderRules): McpServer {
       pattern: z.string().describe('Regular expression pattern to match sender email addresses'),
       action: z.string().describe('The action to assign to matching senders (must be a valid action name)'),
       description: z.string().optional().describe('Optional human-readable description of what this pattern matches'),
+      important: z.boolean().optional().describe('When true, hold matching emails in inbox flagged for TTL duration'),
+      important_ttl_days: z.number().int().min(1).optional().describe('Days to hold in inbox when important (default: 7)'),
     },
     async (params) => {
       try {
@@ -357,6 +364,22 @@ export function createServer(rules: SenderRules): McpServer {
     async (params) => {
       try {
         const result = await handleEvaluateRegex(params);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: (err as Error).message }) }], isError: true };
+      }
+    }
+  );
+
+  // ── TTL Management ──
+
+  server.tool(
+    'process_ttl_expirations',
+    'Check inbox for important-flagged emails past their TTL and route them to their action folders. Called during session setup.',
+    {},
+    async () => {
+      try {
+        const result = await handleProcessTtlExpirations();
         return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
         return { content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: (err as Error).message }) }], isError: true };
@@ -453,6 +476,6 @@ export function createServer(rules: SenderRules): McpServer {
     }
   );
 
-  logger.info('MCP server created with 23 tools registered');
+  logger.info('MCP server created with 24 tools registered');
   return server;
 }

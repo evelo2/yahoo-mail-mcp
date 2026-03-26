@@ -11,7 +11,17 @@ export function initClassifySender(senderRules: SenderRules) {
 export async function handleClassifySender(params: {
   email_address: string;
   action: string;
-}): Promise<{ email_address: string; action: string; rule_id: string; overwritten: boolean; total_rules: number }> {
+  important?: boolean;
+  important_ttl_days?: number;
+}): Promise<{
+  email_address: string;
+  action: string;
+  rule_id: string;
+  overwritten: boolean;
+  total_rules: number;
+  important?: boolean;
+  important_ttl_days?: number;
+}> {
   const normalized = params.email_address.toLowerCase();
   const action = params.action.toLowerCase();
 
@@ -24,10 +34,15 @@ export async function handleClassifySender(params: {
   const overwritten = !!existing;
   const rule_id = existing?.rule_id ?? generateRuleId();
 
-  rules.exact.set(normalized, { action, rule_id });
+  rules.exact.set(normalized, {
+    action,
+    rule_id,
+    ...(params.important ? { important: true } : {}),
+    ...(params.important_ttl_days != null ? { important_ttl_days: params.important_ttl_days } : {}),
+  });
   saveSenderRules(rules);
 
-  logger.info({ email: normalized, action, overwritten, rule_id }, 'Sender classified');
+  logger.info({ email: normalized, action, overwritten, rule_id, important: params.important }, 'Sender classified');
 
   return {
     email_address: normalized,
@@ -35,5 +50,7 @@ export async function handleClassifySender(params: {
     rule_id,
     overwritten,
     total_rules: rules.exact.size + rules.regex.length,
+    ...(params.important ? { important: true } : {}),
+    ...(params.important_ttl_days != null ? { important_ttl_days: params.important_ttl_days } : {}),
   };
 }

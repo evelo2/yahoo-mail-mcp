@@ -4,6 +4,25 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
+## 2026-03-26 — `important` Boolean Modifier with TTL on Rules
+
+### Added
+- **`important` boolean modifier on rules** — Any exact or regex rule can now have `important: true` and `important_ttl_days: N`. When set, matching emails are held in INBOX flagged for N days before routing to their action folder.
+- **TTL tracking store** (`config/ttl_records.json`) — Persistent store tracking which inbox emails are being held under the important modifier. Records contain UID, action, folder, arrival time, and expiry time.
+- **`process_ttl_expirations` tool** — New MCP tool (24 total). Sweeps inbox for important-flagged emails past their TTL. Moves expired emails to their action folders, unflags them, and prunes orphaned records. Returns `{ checked, moved, orphaned }`.
+- **`classify_sender` / `classify_senders`** — Now accept optional `important` (boolean) and `important_ttl_days` (number) parameters.
+- **`add_regex_rule`** — Now accepts optional `important` and `important_ttl_days` parameters.
+- **`list_rules`** — Response includes `important` and `important_ttl_days` fields where set.
+- **`process_known_senders`** — Response now includes `important_held` count. When a matching rule has `important: true`, the email is flagged and held in inbox rather than immediately moved.
+
+### Design Decisions
+- TTL lives on the rule, not on the action definition. Different senders with the same action can have different hold periods.
+- Default TTL is 7 days when `important: true` is set but `important_ttl_days` is omitted.
+- The standalone `important` action remains valid during transition but is deprecated for new classifications.
+- Orphan detection: if an email is manually moved out of inbox before TTL expiry, the record is pruned during the next sweep.
+
+---
+
 ## 2026-03-25 — Data Architecture: Atomic Writes, Backup Rotation, Audit Log
 
 ### Added

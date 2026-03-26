@@ -8,6 +8,8 @@ export interface LookupResult {
   match_type?: 'exact' | 'regex';
   matched_pattern?: string;
   rule_id?: string;
+  important?: boolean;
+  important_ttl_days?: number;
 }
 
 // Cache compiled RegExp objects to avoid recompilation on every lookup.
@@ -49,6 +51,7 @@ export function lookupSender(rules: SenderRules, emailAddress: string): LookupRe
       matched: true,
       match_type: 'exact',
       rule_id: exactRule.rule_id,
+      ...(exactRule.important ? { important: true, important_ttl_days: exactRule.important_ttl_days ?? 7 } : {}),
     };
   }
 
@@ -63,6 +66,7 @@ export function lookupSender(rules: SenderRules, emailAddress: string): LookupRe
         match_type: 'regex',
         matched_pattern: rule.pattern,
         rule_id: rule.rule_id,
+        ...(rule.important ? { important: true, important_ttl_days: rule.important_ttl_days ?? 7 } : {}),
       };
     }
   }

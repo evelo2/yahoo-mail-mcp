@@ -13,6 +13,8 @@ interface RuleResult {
   email_address?: string;
   pattern?: string;
   description?: string;
+  important?: boolean;
+  important_ttl_days?: number;
 }
 
 export async function handleListRules(params: {
@@ -44,6 +46,7 @@ export async function handleListRules(params: {
         action: rule.action,
         pattern: rule.pattern,
         description: rule.description,
+        ...(rule.important ? { important: true, important_ttl_days: rule.important_ttl_days ?? 7 } : {}),
       });
     }
   }
@@ -62,6 +65,7 @@ export async function handleListRules(params: {
         rule_id: rule.rule_id,
         action: rule.action,
         email_address: email,
+        ...(rule.important ? { important: true, important_ttl_days: rule.important_ttl_days ?? 7 } : {}),
       });
     }
   }

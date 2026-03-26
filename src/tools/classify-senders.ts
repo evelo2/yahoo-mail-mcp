@@ -11,6 +11,8 @@ export function initClassifySenders(senderRules: SenderRules) {
 interface Classification {
   email_address: string;
   action: string;
+  important?: boolean;
+  important_ttl_days?: number;
 }
 
 interface FailedClassification {
@@ -27,7 +29,7 @@ export async function handleClassifySenders(params: {
   let saved = 0;
 
   // Validate all entries first, separate valid from invalid
-  const validEntries: { normalized: string; action: string }[] = [];
+  const validEntries: { normalized: string; action: string; important?: boolean; important_ttl_days?: number }[] = [];
 
   for (const entry of params.classifications) {
     const normalized = entry.email_address.toLowerCase();
@@ -42,15 +44,22 @@ export async function handleClassifySenders(params: {
       continue;
     }
 
-    validEntries.push({ normalized, action });
+    validEntries.push({
+      normalized,
+      action,
+      important: entry.important,
+      important_ttl_days: entry.important_ttl_days,
+    });
   }
 
   // Apply all valid entries (last one wins for duplicates, preserve existing rule_id)
-  for (const { normalized, action } of validEntries) {
+  for (const { normalized, action, important, important_ttl_days } of validEntries) {
     const existing = rules.exact.get(normalized);
     rules.exact.set(normalized, {
       action,
       rule_id: existing?.rule_id ?? generateRuleId(),
+      ...(important ? { important: true } : {}),
+      ...(important_ttl_days != null ? { important_ttl_days } : {}),
     });
     saved++;
   }
