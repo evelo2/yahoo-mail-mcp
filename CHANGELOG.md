@@ -4,12 +4,17 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
-## 2026-03-26 — Subject-Line Branching Investigation (Spike)
+## 2026-03-26 — Subject-Line Branching Investigation (Spike) — COMPLETE
 
 ### Added
-- **Investigation story** (`stories/2026-03-26_subject-line-branching-investigation.md`) — Spike to evaluate subject-line branching for the rules engine, enabling different actions for transactional vs promotional emails from the same sender address
-- Three architecture options documented (inline subject routes, separate subject rules table, subject-aware regex rules) with lookup complexity, config ergonomics, and migration analysis
-- Tool impact assessment, edge case catalogue, and performance benchmarking plan
+- **Investigation findings** (`docs/investigation-subject-line-branching.md`) — Full analysis of three architecture options for subject-line branching
+- **Implementation story** (`stories/2026-03-26_subject-line-branching-implementation.md`) — Detailed implementation plan for Option A (inline subject routes)
+- Confirmed IMAP envelope already includes subject at zero additional fetch cost
+- Analysed 422 exact rules: identified 16 domains with multi-action senders, estimated 5-15 senders would benefit from subject branching
+- Recommended **Option A (inline subject routes on sender rule)**: preserves O(1) lookup for non-branching senders, single-line change to `process_known_senders`, no migration needed
+- Rejected Option B (separate table — data consistency issues) and Option C (regex subject — moves senders from O(1) to O(n))
+- Tool impact assessment for all 7 affected tools plus new `add_subject_route` tool
+- Edge case analysis: first-match-wins, case insensitivity, important modifier inheritance, TTL interaction
 
 ### No functional changes.
 
