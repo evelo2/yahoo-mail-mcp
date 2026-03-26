@@ -4,6 +4,17 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
+## 2026-03-26 — Subject-Line Branching Investigation (Spike)
+
+### Added
+- **Investigation story** (`stories/2026-03-26_subject-line-branching-investigation.md`) — Spike to evaluate subject-line branching for the rules engine, enabling different actions for transactional vs promotional emails from the same sender address
+- Three architecture options documented (inline subject routes, separate subject rules table, subject-aware regex rules) with lookup complexity, config ergonomics, and migration analysis
+- Tool impact assessment, edge case catalogue, and performance benchmarking plan
+
+### No functional changes.
+
+---
+
 ## 2026-03-26 — Documentation Audit and Mermaid Diagram Suite
 
 ### Added
