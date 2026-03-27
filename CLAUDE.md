@@ -132,6 +132,25 @@ modules.
 - Every hot-path change → performance test
 - Run `npm test` before every commit — all tests must pass
 
+### Test Data — Sample Data Only
+
+Tests must use clearly fictitious sample data. Real operational data (real
+email addresses, live rule IDs, actual mailbox UIDs, production credentials)
+must never appear in test files.
+
+**Standards:**
+- Email addresses: `sender@example.com`, `noreply@brand-example.com`,
+  `unknown@mystery.com` — never a real address from `sender-rules.json`
+- Subjects and names: generic and clearly synthetic
+- UIDs: arbitrary integers (100, 200, 1000…) with no relation to a real
+  mailbox state
+- Rule IDs: `test0001`, `perf0001`, `rule00000000` — never a live UUID
+
+**If a test genuinely requires real data to be meaningful** (e.g. a
+production-shape fixture that cannot be anonymised without losing test value),
+**stop and discuss with the human engineer before writing the test.** Do not
+proceed unilaterally — real data in version history is difficult to remove.
+
 ---
 
 ## DRY — Enforced
@@ -165,6 +184,23 @@ problem statement, acceptance criteria.
 
 Stories include: features, bug fixes, investigations/spikes, and
 documentation-only changes.
+
+### PII and Credential Redaction in Stories
+
+Before saving a story file, scrub all personally identifiable information,
+credentials, and real operational data. Replace with clearly fictitious
+sample values.
+
+**Must be redacted:**
+- Email addresses → `user@example.com`, `sender@brand-example.com`
+- Real folder names or rule IDs from the live config
+- API keys, app passwords, tokens of any kind
+- Real domain names tied to a live account
+- UIDs, message IDs, or other identifiers from real mailboxes
+
+**Pattern:** substitute real values at the time of writing the story, before
+the file is committed. Do not redact retroactively after the fact — prevent
+the data from entering version history in the first place.
 
 ### Changelog — Every Story
 
