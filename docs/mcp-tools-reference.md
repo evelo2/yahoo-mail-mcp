@@ -464,8 +464,8 @@ Look up a sender email address against the rules config. Read-only; does not mod
 2. Check exact rules Map
 3. If exact match found:
    a. If subject provided AND rule has subject_routes:
-      - Evaluate each route's contains keywords against subject (case-insensitive, first match wins)
-      - If route matches → return with route's action and route_id
+      - Test each route's pattern regex against subject (case-insensitive 'i' flag, cached, first match wins)
+      - If route matches → return with route's action, route_id, and matched_subject_pattern
    b. Return with base action, match_type: "exact", rule_id
 4. If no exact match, iterate regex rules (definition order):
    a. Compile pattern (cached) with case-insensitive flag
@@ -537,7 +537,7 @@ Persist a single sender-to-action mapping. Case-insensitive. Overwrites existing
 | `action` | `string` | Yes | The action to assign. Must be a valid action name. |
 | `important` | `boolean` | No | When true, hold in inbox with TTL before routing. |
 | `important_ttl_days` | `number` | No | Days to hold when important (default: 7). |
-| `subject_routes` | `Array<{ contains, action, important?, important_ttl_days? }>` | No | Subject-based routing. When provided, replaces all existing subject routes. Existing routes are preserved when omitted. |
+| `subject_routes` | `Array<{ pattern, action, important?, important_ttl_days? }>` | No | Subject-based routing. When provided, replaces all existing subject routes. Existing routes are preserved when omitted. |
 
 #### Flow Logic
 
@@ -673,14 +673,16 @@ Add a new regex pattern rule for sender matching. Regex rules are evaluated afte
 
 ### `add_subject_route`
 
-Add subject-based routing to an existing sender rule. Emails matching any keyword in `contains` (case-insensitive substring, OR logic) route to the specified action instead of the sender's base action. First matching route wins.
+Add subject-based routing to an existing sender rule. The `pattern` is a JavaScript regex tested case-insensitively against the subject line. First matching route wins; unmatched emails fall through to the sender's base action.
+
+**Pattern tips:** `"order.*confirm"` matches "Order NB-19643 confirmed"; `"shipped|tracking|delivered"` matches any of those words.
 
 #### Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `email_address` | `string` | Yes | Sender email address (must have an existing exact rule). |
-| `contains` | `string[]` | Yes | Case-insensitive keywords to match in subject line (OR logic). |
+| `pattern` | `string` | Yes | Regex pattern matched case-insensitively against the subject line. Use `\|` for OR logic, `.*` between words. |
 | `action` | `string` | Yes | Action to apply when subject matches. Must be a valid action name. |
 | `important` | `boolean` | No | Override sender-level important setting for this route. |
 | `important_ttl_days` | `number` | No | Days to hold in inbox when important. |
@@ -692,7 +694,7 @@ Add subject-based routing to an existing sender rule. Emails matching any keywor
 2. Check if email_address exists as an exact rule
    - If not found → throw Error
 3. Validate action against current action table
-4. Validate contains is non-empty array of non-empty strings
+4. Validate pattern: non-empty, not ^.*$ or .* (too broad), compiles as RegExp
 5. Generate unique 8-char hex route_id
 6. Append route to exactRule.subject_routes array
 7. Save entire rules config to disk
@@ -705,7 +707,7 @@ Add subject-based routing to an existing sender rule. Emails matching any keywor
 {
   "email_address": "noreply@store.com",
   "route_id": "a1b2c3d5",
-  "contains": ["shipped", "tracking", "delivered"],
+  "pattern": "shipped|tracking|delivered",
   "action": "shipping",
   "base_action": "subscriptions",
   "total_routes": 2
@@ -718,7 +720,7 @@ Add subject-based routing to an existing sender rule. Emails matching any keywor
 |---|---|
 | `Error` | Sender email address not found in exact rules |
 | `Error` | Action name is not in the action table |
-| `Error` | `contains` is empty or contains empty strings |
+| `Error` | Pattern is empty, invalid regex, or too broad (`^.*$`, `.*`) |
 
 ---
 

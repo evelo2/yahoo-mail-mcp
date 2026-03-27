@@ -54,14 +54,14 @@ All configuration is loaded from environment variables, typically via a `.env` f
       "subject_routes": [
         {
           "route_id": "c9d0e1f3",
-          "contains": ["shipped", "tracking", "delivered"],
+          "pattern": "shipped|tracking|delivered",
           "action": "shipping",
           "important": true,
           "important_ttl_days": 1
         },
         {
           "route_id": "c9d0e1f4",
-          "contains": ["order confirmed", "receipt"],
+          "pattern": "order.*confirm|receipt",
           "action": "invoice",
           "important": true,
           "important_ttl_days": 1
@@ -114,7 +114,7 @@ Regex rules match sender email addresses using JavaScript regular expressions wi
 - **Runtime editable**: Rules can be modified both via MCP tools (`classify_sender`, `classify_senders`, `add_regex_rule`, `remove_rule`) and by editing the JSON file directly. However, direct file edits are only picked up on server restart.
 - **Action validation**: When classifying via tools, the action must exist in the current action table (built-in + custom). Manual file edits are not validated until the action is applied.
 - **Rule IDs**: Every rule (exact and regex) has a unique `rule_id`. IDs are generated via `randomUUID().slice(0, 8)` and are stable across saves. They are used to identify rules in `list_rules`, `remove_rule`, and lookup responses.
-- **Subject routes**: Optional on exact rules only. Each route has a unique `route_id` and an array of `contains` keywords matched case-insensitively as substrings against the email subject (OR logic). Routes are evaluated in definition order (first match wins). Each route can independently set `action`, `important`, and `important_ttl_days`, overriding the sender-level values. Manage via `add_subject_route` and `remove_rule(route_id: "...")`.
+- **Subject routes**: Optional on exact rules only. Each route has a unique `route_id` and a `pattern` regex tested case-insensitively against the email subject (first match wins). Use `|` for OR logic (`"shipped|tracking"`), `.*` between words (`"order.*confirm"`). Routes are evaluated in definition order. Each route independently sets `action`, `important`, and `important_ttl_days`, overriding the sender-level values. Manage via `add_subject_route` and `remove_rule(route_id: "...")`. Legacy `contains: string[]` rules are auto-migrated to `pattern` on startup.
 
 ### Managing Rules
 
@@ -139,7 +139,7 @@ list_rules(type: "regex")
 
 **Subject routes via MCP tools (for senders that need subject-based branching):**
 ```
-add_subject_route("noreply@store.com", contains: ["shipped", "tracking"], action: "shipping", important: true, important_ttl_days: 1)
+add_subject_route("noreply@store.com", pattern: "shipped|tracking", action: "shipping", important: true, important_ttl_days: 1)
 remove_rule(route_id: "c9d0e1f3")  // remove a single subject route
 ```
 

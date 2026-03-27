@@ -190,7 +190,7 @@ interface ExactRule {
 
 interface SubjectRoute {
   route_id: string;              // Unique ID for targeted removal
-  contains: string[];            // Case-insensitive substring keywords (OR logic)
+  pattern: string;               // Regex, matched with 'i' flag. Use | for OR, .* between words.
   action: string;                // Override action when subject matches
   important?: boolean;           // Override sender-level important setting
   important_ttl_days?: number;
@@ -199,7 +199,11 @@ interface SubjectRoute {
 
 Stored as `Map<lowercase_email, ExactRule>` in memory, serialized as a plain object in `sender-rules.json`.
 
-**Subject routes** allow a single sender to route to different actions based on email subject keywords. When `subject_routes` is present, the engine evaluates each route's `contains` keywords against the subject (case-insensitive substring match, OR logic). First matching route wins. If no route matches, the base `action` is used. Subject routes can independently set `important` and `important_ttl_days`, overriding the sender-level settings.
+**Subject routes** allow a single sender to route to different actions based on the email subject. When `subject_routes` is present, the engine tests each route's `pattern` regex against the subject (case-insensitive, using the shared `getCompiledRegex` cache). First matching route wins. If no route matches, the base `action` is used. Subject routes can independently set `important` and `important_ttl_days`, overriding the sender-level settings.
+
+**Pattern examples:** `"order.*confirm"` matches "Order NB-19643 confirmed"; `"shipped|tracking|delivered"` matches any of those words; `"invoice|receipt"` matches either.
+
+**Migration:** Legacy rules using the old `contains: string[]` format are automatically migrated to a `pattern` string on server startup via `migrateSubjectRoutesToPattern()`. The migration is idempotent and logged.
 
 ### Regex Rules
 
@@ -237,7 +241,9 @@ Stored as an ordered array. Patterns validated against catastrophic backtracking
 2. Load custom actions from config/custom-actions.json
 3. Load sender rules from config/sender-rules.json
    - Detect format: new structured or legacy flat
-   - If legacy: backup → migrate → save new format
+   - If legacy flat: backup → migrate → save new format
+3b. Migrate subject routes: any route with old `contains: string[]` format
+    converted to `pattern: string` (idempotent, logged, saved if changed)
 4. Initialize TTL store from config/ttl_records.json
 5. Run preflight checks (unless SKIP_PREFLIGHT=true):
    a. Validate YAHOO_EMAIL and YAHOO_APP_PASSWORD

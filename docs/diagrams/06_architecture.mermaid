@@ -10,10 +10,10 @@ graph LR
     end
 
     subgraph Server["Yahoo Mail MCP Server"]
-        subgraph Tools["Tool Router (24 tools)"]
+        subgraph Tools["Tool Router (25 tools)"]
             EMAIL[Email Ops<br/>list_inbox, get_email,<br/>apply_action, process_email,<br/>process_known_senders,<br/>list_folder_emails]
             CLASS[Classification<br/>lookup_sender,<br/>classify_sender,<br/>classify_senders]
-            RULES[Rule Mgmt<br/>add_regex_rule,<br/>remove_rule, list_rules,<br/>evaluate_regex]
+            RULES[Rule Mgmt<br/>add_regex_rule, add_subject_route,<br/>remove_rule, list_rules,<br/>evaluate_regex]
             ACTIONS[Action Mgmt<br/>add_action,<br/>get_actions]
             SYSTEM[System Ops<br/>ensure_folders,<br/>run_summary,<br/>health_check]
             TTL[TTL Mgmt<br/>process_ttl_expirations]
@@ -22,6 +22,7 @@ graph LR
 
         subgraph Engine["Rules Engine"]
             EXACT[Exact Rules<br/>Map lookup O1]
+            SUBJ[Subject Routes<br/>Regex pattern, i flag]
             REGEX[Regex Rules<br/>Ordered, first match]
             CACHE[Regex Cache<br/>LRU, max 500]
         end
@@ -57,7 +58,8 @@ graph LR
 
     IMAP -->|TLS :993| YIMAP
 
-    EXACT --> REGEX
+    EXACT --> SUBJ
+    SUBJ --> REGEX
     REGEX --> CACHE
 
     style Client fill:#e8f4f8,stroke:#0077b6

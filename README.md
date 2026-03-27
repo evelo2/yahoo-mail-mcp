@@ -87,8 +87,9 @@ On first startup the server will:
 
 1. **Load sender rules** from `config/sender-rules.json` — if using the example template, you'll start with a few placeholder rules. Replace or remove these as you classify real senders.
 2. **Load custom actions** from `config/custom-actions.json` — defines action types beyond the built-ins. The example shows the format; you can start with an empty `{}` if you only need the built-in actions.
-3. **Create `config/prompt.md`** automatically with default operating instructions (version 1). This is the runtime prompt retrieved by `get_prompt`.
-4. **Run preflight checks** — connects to Yahoo IMAP, verifies inbox access, and checks required folders. If this fails, check your `.env` credentials. Set `SKIP_PREFLIGHT=true` to bypass during development.
+3. **Migrate any legacy subject routes** — any rule using the old `contains: string[]` format is automatically converted to the current `pattern: string` regex format. This is logged and idempotent.
+4. **Create `config/prompt.md`** automatically with default operating instructions (version 1). This is the runtime prompt retrieved by `get_prompt`.
+5. **Run preflight checks** — connects to Yahoo IMAP, verifies inbox access, and checks required folders. If this fails, check your `.env` credentials. Set `SKIP_PREFLIGHT=true` to bypass during development.
 
 After the first session of classifying senders, your `sender-rules.json` will grow as rules are added via `classify_sender` and `classify_senders`. This file is the primary accumulated state — it is automatically backed up (5 rolling copies) before every save.
 
