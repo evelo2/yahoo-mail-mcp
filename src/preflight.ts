@@ -1,6 +1,7 @@
 import { getConnection, getClientConfig } from './imap/client.js';
 import { getEmail } from './imap/operations.js';
 import { logger } from './utils/logger.js';
+import { maskEmail } from './utils/mask.js';
 
 interface PreflightResult {
   success: boolean;
@@ -124,7 +125,7 @@ export function printPreflightReport(result: PreflightResult): void {
   console.log('');
 
   if (result.success) {
-    console.log(`  ✅ Connection      ${result.email} → OK`);
+    console.log(`  ✅ Connection      ${maskEmail(result.email)} → OK`);
     console.log(`  ✅ Inbox           ${result.inboxCount} messages`);
     console.log(`  ✅ Folders         ${result.folders.length} found`);
     if (result.fetchedEmail) {

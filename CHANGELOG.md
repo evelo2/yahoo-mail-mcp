@@ -4,6 +4,22 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
+## 2026-03-27 — Mask Sensitive Data in Preflight Logs (CWE-312)
+
+### Fixed
+- **CWE-312 (Cleartext Storage of Sensitive Information):** IMAP authentication
+  email address was printed in cleartext in the preflight success banner
+  (`✅ Connection user@example.com → OK`). Now masked as `use***@example.com`.
+- Full codebase audit confirmed no other YAHOO_EMAIL or app password exposure
+  in any log or tool response output.
+
+### Added
+- **`src/utils/mask.ts`** — `maskEmail()` utility: shows first 3 characters of
+  the local part, replaces the rest with `***`, preserves the full domain.
+  9 unit tests added in `tests/unit/mask-email.test.ts`.
+
+---
+
 ## 2026-03-26 — Subject-Line Branching (Option A — Inline Routes)
 
 ### Added
