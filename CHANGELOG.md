@@ -4,6 +4,32 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
+## 2026-03-26 — Subject-Line Branching (Option A — Inline Routes)
+
+### Added
+- **`SubjectRoute` type** on `ExactRule` — optional `subject_routes` array enables different actions based on email subject keywords per sender
+- **`add_subject_route` tool** (25 tools total) — dedicated tool to add subject-based routing to an existing sender rule
+- **Subject-aware `lookupSender()`** — accepts optional `subject` parameter; evaluates subject routes in order (first match wins, case-insensitive substring matching)
+- **`route_id`** on `LookupResult` — present when a subject route matched, enabling targeted removal
+- **`route_id` on `remove_rule`** — removes a single subject route without removing the sender rule
+
+### Changed
+- **`process_known_senders`** — now passes `email.subject` to `lookupSender()` for subject-aware routing (1-line change)
+- **`process_email`** — accepts optional `subject` parameter for subject routing
+- **`lookup_sender`** — accepts optional `subject` parameter
+- **`classify_sender` / `classify_senders`** — accept optional `subject_routes` for initial classification with routes; preserves existing routes on overwrite when not explicitly provided
+- **`list_rules`** — includes `subject_routes` in output; search filter matches against route keywords
+- **Important modifier inheritance** — subject routes can override or inherit sender-level `important`/`important_ttl_days` settings
+
+### Design Decisions
+- **First match wins** for subject routes (consistent with regex rule evaluation)
+- **Substring matching only** in v1 (no regex in `contains`) — simpler, faster, more LLM-friendly
+- **No subject routes on regex rules** in v1 — regex rules match domains, not individual senders
+- **Zero performance impact** on non-branching senders — O(1) exact lookup unchanged
+- **Zero IMAP cost** — subject already in envelope fetch
+
+---
+
 ## 2026-03-26 — Subject-Line Branching Investigation (Spike) — COMPLETE
 
 ### Added

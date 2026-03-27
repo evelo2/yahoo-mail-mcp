@@ -8,6 +8,7 @@ export interface LookupResult {
   match_type?: 'exact' | 'regex';
   matched_pattern?: string;
   rule_id?: string;
+  route_id?: string;
   important?: boolean;
   important_ttl_days?: number;
 }
@@ -39,12 +40,33 @@ export function clearRegexCache(): void {
   regexCache.clear();
 }
 
-export function lookupSender(rules: SenderRules, emailAddress: string): LookupResult {
+export function lookupSender(rules: SenderRules, emailAddress: string, subject?: string): LookupResult {
   const normalized = emailAddress.toLowerCase();
 
   // 1. Exact match takes priority
   const exactRule = rules.exact.get(normalized);
   if (exactRule) {
+    // 1a. Check subject routes if subject provided and routes exist (first match wins)
+    if (subject && exactRule.subject_routes?.length) {
+      const lowerSubject = subject.toLowerCase();
+      for (const route of exactRule.subject_routes) {
+        if (route.contains.some(kw => lowerSubject.includes(kw.toLowerCase()))) {
+          // Subject route can override or inherit the sender-level important setting
+          const important = route.important ?? exactRule.important;
+          const ttlDays = route.important_ttl_days ?? (route.important != null ? 7 : exactRule.important_ttl_days ?? 7);
+          return {
+            email_address: emailAddress,
+            action: route.action,
+            matched: true,
+            match_type: 'exact',
+            rule_id: exactRule.rule_id,
+            route_id: route.route_id,
+            ...(important ? { important: true, important_ttl_days: ttlDays } : {}),
+          };
+        }
+      }
+    }
+    // 1b. No subject route matched — use base action
     return {
       email_address: emailAddress,
       action: exactRule.action,

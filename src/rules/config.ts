@@ -15,11 +15,20 @@ const isSafeRegex: (pattern: string) => boolean = require('safe-regex2');
 
 export type Action = string;
 
+export interface SubjectRoute {
+  route_id: string;
+  contains: string[];          // case-insensitive substring matches, OR logic
+  action: string;
+  important?: boolean;
+  important_ttl_days?: number;
+}
+
 export interface ExactRule {
   action: string;
   rule_id: string;
   important?: boolean;
   important_ttl_days?: number;
+  subject_routes?: SubjectRoute[];
 }
 
 export interface RegexRule {
@@ -39,7 +48,7 @@ export interface SenderRules {
 
 // On-disk JSON format
 interface SenderRulesJSON {
-  exact: Record<string, { action: string; rule_id: string; important?: boolean; important_ttl_days?: number }>;
+  exact: Record<string, { action: string; rule_id: string; important?: boolean; important_ttl_days?: number; subject_routes?: SubjectRoute[] }>;
   regex: Array<{ rule_id: string; pattern: string; action: string; description?: string; important?: boolean; important_ttl_days?: number }>;
 }
 
@@ -87,12 +96,13 @@ export function loadSenderRules(configPath: string): SenderRules {
   if (isNewFormat(parsed)) {
     // New structured format
     for (const [email, entry] of Object.entries(parsed.exact)) {
-      const rule = entry as { action: string; rule_id?: string; important?: boolean; important_ttl_days?: number };
+      const rule = entry as { action: string; rule_id?: string; important?: boolean; important_ttl_days?: number; subject_routes?: SubjectRoute[] };
       rules.exact.set(email.toLowerCase(), {
         action: rule.action,
         rule_id: rule.rule_id || generateRuleId(),
         ...(rule.important ? { important: true } : {}),
         ...(rule.important_ttl_days != null ? { important_ttl_days: rule.important_ttl_days } : {}),
+        ...(rule.subject_routes?.length ? { subject_routes: rule.subject_routes } : {}),
       });
     }
     if (Array.isArray(parsed.regex)) {
@@ -143,6 +153,7 @@ export function saveSenderRules(rules: SenderRules): void {
       rule_id: rule.rule_id,
       ...(rule.important ? { important: true } : {}),
       ...(rule.important_ttl_days != null ? { important_ttl_days: rule.important_ttl_days } : {}),
+      ...(rule.subject_routes?.length ? { subject_routes: rule.subject_routes } : {}),
     };
   }
 
@@ -225,8 +236,22 @@ export interface RemoveRuleResult {
 
 export function removeRule(
   rules: SenderRules,
-  identifier: { rule_id?: string; email_address?: string; pattern?: string },
+  identifier: { rule_id?: string; email_address?: string; pattern?: string; route_id?: string },
 ): RemoveRuleResult {
+  // 0. Try route_id first — removes a single subject route, not the whole rule
+  if (identifier.route_id) {
+    for (const [email, rule] of rules.exact) {
+      if (!rule.subject_routes) continue;
+      const idx = rule.subject_routes.findIndex(r => r.route_id === identifier.route_id);
+      if (idx !== -1) {
+        const removed = rule.subject_routes.splice(idx, 1)[0];
+        if (rule.subject_routes.length === 0) delete rule.subject_routes;
+        saveSenderRules(rules);
+        return { removed: true, rule_id: rule.rule_id, type: 'exact', email_address: email, action: removed.action };
+      }
+    }
+  }
+
   // 1. Try rule_id first (works for both exact and regex)
   if (identifier.rule_id) {
     // Check exact rules
@@ -268,6 +293,66 @@ export function removeRule(
   }
 
   return { removed: false };
+}
+
+// ── Subject route helpers ──
+
+export interface AddSubjectRouteResult {
+  email_address: string;
+  route_id: string;
+  contains: string[];
+  action: string;
+  base_action: string;
+  total_routes: number;
+  important?: boolean;
+  important_ttl_days?: number;
+}
+
+export function addSubjectRoute(
+  rules: SenderRules,
+  emailAddress: string,
+  route: { contains: string[]; action: string; important?: boolean; important_ttl_days?: number },
+): AddSubjectRouteResult {
+  const normalized = emailAddress.toLowerCase();
+  const exactRule = rules.exact.get(normalized);
+  if (!exactRule) {
+    throw new Error(`No exact rule found for "${emailAddress}". Create a sender rule first with classify_sender.`);
+  }
+
+  const action = route.action.toLowerCase();
+  const validActions = getValidActions();
+  if (!validActions.has(action)) {
+    throw new Error(`Invalid action: "${action}". Valid actions: ${[...validActions].join(', ')}`);
+  }
+
+  if (!route.contains.length || route.contains.some(k => !k.trim())) {
+    throw new Error('contains must be a non-empty array of non-empty strings');
+  }
+
+  const subjectRoute: SubjectRoute = {
+    route_id: generateRuleId(),
+    contains: route.contains,
+    action,
+    ...(route.important != null ? { important: route.important } : {}),
+    ...(route.important_ttl_days != null ? { important_ttl_days: route.important_ttl_days } : {}),
+  };
+
+  if (!exactRule.subject_routes) exactRule.subject_routes = [];
+  exactRule.subject_routes.push(subjectRoute);
+  saveSenderRules(rules);
+
+  logger.info({ email: normalized, route_id: subjectRoute.route_id, action, contains: route.contains }, 'Subject route added');
+
+  return {
+    email_address: normalized,
+    route_id: subjectRoute.route_id,
+    contains: route.contains,
+    action,
+    base_action: exactRule.action,
+    total_routes: exactRule.subject_routes.length,
+    ...(route.important != null ? { important: route.important } : {}),
+    ...(route.important_ttl_days != null ? { important_ttl_days: route.important_ttl_days } : {}),
+  };
 }
 
 // ── Custom Actions persistence ──

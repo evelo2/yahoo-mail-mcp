@@ -7,6 +7,6 @@ export function initLookupSender(senderRules: SenderRules) {
   rules = senderRules;
 }
 
-export async function handleLookupSender(params: { email_address: string }) {
-  return lookupSender(rules, params.email_address);
+export async function handleLookupSender(params: { email_address: string; subject?: string }) {
+  return lookupSender(rules, params.email_address, params.subject);
 }

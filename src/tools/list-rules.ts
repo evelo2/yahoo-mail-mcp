@@ -1,4 +1,4 @@
-import type { SenderRules } from '../rules/config.js';
+import type { SenderRules, SubjectRoute } from '../rules/config.js';
 
 let rules: SenderRules;
 
@@ -15,6 +15,7 @@ interface RuleResult {
   description?: string;
   important?: boolean;
   important_ttl_days?: number;
+  subject_routes?: SubjectRoute[];
 }
 
 export async function handleListRules(params: {
@@ -55,9 +56,14 @@ export async function handleListRules(params: {
   if (filterType === 'all' || filterType === 'exact') {
     const sortedExact = [...rules.exact.entries()].sort(([a], [b]) => a.localeCompare(b));
     for (const [email, rule] of sortedExact) {
-      if (filterAction && rule.action !== filterAction) continue;
+      if (filterAction && rule.action !== filterAction) {
+        // Also check if any subject route matches the action filter
+        const hasMatchingRoute = rule.subject_routes?.some(sr => sr.action === filterAction);
+        if (!hasMatchingRoute) continue;
+      }
       if (search) {
-        const haystack = `${email} ${rule.action}`.toLowerCase();
+        const routeKeywords = rule.subject_routes?.flatMap(sr => sr.contains).join(' ') ?? '';
+        const haystack = `${email} ${rule.action} ${routeKeywords}`.toLowerCase();
         if (!haystack.includes(search)) continue;
       }
       results.push({
@@ -66,6 +72,7 @@ export async function handleListRules(params: {
         action: rule.action,
         email_address: email,
         ...(rule.important ? { important: true, important_ttl_days: rule.important_ttl_days ?? 7 } : {}),
+        ...(rule.subject_routes?.length ? { subject_routes: rule.subject_routes } : {}),
       });
     }
   }

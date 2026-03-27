@@ -2,7 +2,7 @@
 
 **Type:** Feature
 **Priority:** High
-**Status:** PENDING
+**Status:** COMPLETE
 **Created:** 2026-03-26
 **Depends on:** Investigation complete (`docs/investigation-subject-line-branching.md`)
 

@@ -12,8 +12,9 @@ export function initProcessEmail(senderRules: SenderRules) {
 export async function handleProcessEmail(params: {
   uid: number;
   from_address: string;
+  subject?: string;
 }) {
-  const lookup = lookupSender(rules, params.from_address);
+  const lookup = lookupSender(rules, params.from_address, params.subject);
 
   if (!lookup.matched) {
     return {

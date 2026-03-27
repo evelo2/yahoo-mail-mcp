@@ -20,6 +20,7 @@ import { handleListRules, initListRules } from './tools/list-rules.js';
 import { handleListFolderEmails } from './tools/list-folder-emails.js';
 import { handleEvaluateRegex, initEvaluateRegex } from './tools/evaluate-regex.js';
 import { handleProcessTtlExpirations } from './tools/process-ttl-expirations.js';
+import { handleAddSubjectRoute, initAddSubjectRoute } from './tools/add-subject-route.js';
 import {
   getPrompt,
   updatePrompt,
@@ -45,6 +46,7 @@ export function createServer(rules: SenderRules): McpServer {
   initRemoveRule(rules);
   initListRules(rules);
   initEvaluateRegex(rules);
+  initAddSubjectRoute(rules);
 
   const server = new McpServer({
     name: 'yahoo-mail',
@@ -120,9 +122,10 @@ export function createServer(rules: SenderRules): McpServer {
 
   server.tool(
     'lookup_sender',
-    'Look up a sender email address against the rules config and return the action.',
+    'Look up a sender email address against the rules config and return the action. If subject is provided, evaluates subject routes for branching senders.',
     {
       email_address: zEmail,
+      subject: z.string().optional().describe('Email subject line. If provided, evaluates subject routes on the matched sender rule.'),
     },
     async (params) => {
       try {
@@ -140,6 +143,7 @@ export function createServer(rules: SenderRules): McpServer {
     {
       uid: zUid,
       from_address: zEmail,
+      subject: z.string().optional().describe('Email subject line. If provided, evaluates subject routes for branching senders.'),
     },
     async (params) => {
       try {
@@ -165,6 +169,13 @@ export function createServer(rules: SenderRules): McpServer {
     }
   );
 
+  const zSubjectRouteInput = z.object({
+    contains: z.array(z.string().min(1)).min(1).describe('Case-insensitive keywords to match in subject (OR logic)'),
+    action: z.string().describe('The action to apply when subject matches'),
+    important: z.boolean().optional().describe('Override sender-level important setting for this route'),
+    important_ttl_days: z.number().int().min(1).optional().describe('Days to hold when important'),
+  });
+
   server.tool(
     'classify_sender',
     'Persist a new sender-to-action mapping to the rules config. Case-insensitive. Supports overwrite.',
@@ -173,6 +184,7 @@ export function createServer(rules: SenderRules): McpServer {
       action: z.string().describe('The action to assign (must be a valid action name)'),
       important: z.boolean().optional().describe('When true, email is held in inbox flagged for TTL duration before routing to action folder'),
       important_ttl_days: z.number().int().min(1).optional().describe('Days to hold in inbox when important (default: 7)'),
+      subject_routes: z.array(zSubjectRouteInput).optional().describe('Optional subject-based routing. When provided, replaces all existing subject routes.'),
     },
     async (params) => {
       try {
@@ -193,6 +205,7 @@ export function createServer(rules: SenderRules): McpServer {
         action: z.string().describe('The action to assign'),
         important: z.boolean().optional().describe('When true, hold in inbox flagged for TTL duration'),
         important_ttl_days: z.number().int().min(1).optional().describe('Days to hold when important (default: 7)'),
+        subject_routes: z.array(zSubjectRouteInput).optional().describe('Optional subject-based routing for this sender'),
       })).describe('Array of sender-to-action classifications'),
     },
     async (params) => {
@@ -292,11 +305,12 @@ export function createServer(rules: SenderRules): McpServer {
 
   server.tool(
     'remove_rule',
-    'Remove a classification rule (exact or regex) by rule_id, email_address, or pattern. rule_id takes precedence if multiple identifiers are supplied.',
+    'Remove a classification rule (exact or regex) by rule_id, email_address, or pattern. Use route_id to remove a single subject route without removing the sender rule. rule_id takes precedence if multiple identifiers are supplied.',
     {
       rule_id: z.string().optional().describe('The rule_id of the rule to remove (works for both exact and regex rules)'),
       email_address: z.string().optional().describe('The email address of an exact rule to remove'),
       pattern: z.string().optional().describe('The pattern string of a regex rule to remove'),
+      route_id: z.string().optional().describe('The route_id of a subject route to remove (removes only that route, not the sender rule)'),
     },
     async (params) => {
       try {
@@ -364,6 +378,26 @@ export function createServer(rules: SenderRules): McpServer {
     async (params) => {
       try {
         const result = await handleEvaluateRegex(params);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: (err as Error).message }) }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    'add_subject_route',
+    'Add a subject-based routing rule to an existing sender. Emails matching any keyword in contains (case-insensitive, OR logic) route to the specified action instead of the sender\'s base action. First matching route wins.',
+    {
+      email_address: zEmail.describe('Sender email address (must have an existing exact rule)'),
+      contains: z.array(z.string().min(1)).min(1).describe('Case-insensitive keywords to match in subject line (OR logic)'),
+      action: z.string().describe('The action to apply when subject matches (must be a valid action name)'),
+      important: z.boolean().optional().describe('Override sender-level important setting for this route'),
+      important_ttl_days: z.number().int().min(1).optional().describe('Days to hold in inbox when important'),
+    },
+    async (params) => {
+      try {
+        const result = await handleAddSubjectRoute(params);
         return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
         return { content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: (err as Error).message }) }], isError: true };
@@ -476,6 +510,6 @@ export function createServer(rules: SenderRules): McpServer {
     }
   );
 
-  logger.info('MCP server created with 24 tools registered');
+  logger.info('MCP server created with 25 tools registered');
   return server;
 }

@@ -1,4 +1,4 @@
-import type { SenderRules } from '../rules/config.js';
+import type { SenderRules, SubjectRoute } from '../rules/config.js';
 import { saveSenderRules, getValidActions, generateRuleId } from '../rules/config.js';
 import { logger } from '../utils/logger.js';
 
@@ -13,6 +13,7 @@ interface Classification {
   action: string;
   important?: boolean;
   important_ttl_days?: number;
+  subject_routes?: Array<{ contains: string[]; action: string; important?: boolean; important_ttl_days?: number }>;
 }
 
 interface FailedClassification {
@@ -29,7 +30,7 @@ export async function handleClassifySenders(params: {
   let saved = 0;
 
   // Validate all entries first, separate valid from invalid
-  const validEntries: { normalized: string; action: string; important?: boolean; important_ttl_days?: number }[] = [];
+  const validEntries: { normalized: string; action: string; important?: boolean; important_ttl_days?: number; subject_routes?: SubjectRoute[] }[] = [];
 
   for (const entry of params.classifications) {
     const normalized = entry.email_address.toLowerCase();
@@ -44,22 +45,52 @@ export async function handleClassifySenders(params: {
       continue;
     }
 
+    // Validate subject route actions if provided
+    let subjectRoutes: SubjectRoute[] | undefined;
+    if (entry.subject_routes?.length) {
+      let routeError = false;
+      subjectRoutes = [];
+      for (const sr of entry.subject_routes) {
+        const srAction = sr.action.toLowerCase();
+        if (!validActions.has(srAction)) {
+          failed.push({
+            email_address: entry.email_address,
+            action: entry.action,
+            error: `Invalid subject route action: "${srAction}"`,
+          });
+          routeError = true;
+          break;
+        }
+        subjectRoutes.push({
+          route_id: generateRuleId(),
+          contains: sr.contains,
+          action: srAction,
+          ...(sr.important != null ? { important: sr.important } : {}),
+          ...(sr.important_ttl_days != null ? { important_ttl_days: sr.important_ttl_days } : {}),
+        });
+      }
+      if (routeError) continue;
+    }
+
     validEntries.push({
       normalized,
       action,
       important: entry.important,
       important_ttl_days: entry.important_ttl_days,
+      subject_routes: subjectRoutes,
     });
   }
 
   // Apply all valid entries (last one wins for duplicates, preserve existing rule_id)
-  for (const { normalized, action, important, important_ttl_days } of validEntries) {
+  for (const { normalized, action, important, important_ttl_days, subject_routes } of validEntries) {
     const existing = rules.exact.get(normalized);
+    const existingRoutes = existing?.subject_routes;
     rules.exact.set(normalized, {
       action,
       rule_id: existing?.rule_id ?? generateRuleId(),
       ...(important ? { important: true } : {}),
       ...(important_ttl_days != null ? { important_ttl_days } : {}),
+      ...(subject_routes ? { subject_routes } : existingRoutes?.length ? { subject_routes: existingRoutes } : {}),
     });
     saved++;
   }

@@ -78,7 +78,7 @@ export async function handleProcessKnownSenders(params: {
 
     for (const email of emails) {
       seenUids.add(email.uid);
-      const lookup = lookupSender(rules, email.from_address);
+      const lookup = lookupSender(rules, email.from_address, email.subject);
 
       if (!lookup.matched) {
         // Dedup unknown senders by address, keep first occurrence (most recent)
