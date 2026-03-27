@@ -437,4 +437,4 @@ Not recommended for this feature. The added computation is pure in-memory string
 
 ## 8. Implementation Story
 
-See: `stories/2026-03-26_subject-line-branching-implementation.md`
+See: `stories/2026-03-26_subject-line-branching-implementation.md` — **Implementation complete** (merged to main).

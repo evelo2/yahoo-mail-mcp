@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-This document covers all 24 MCP-exposed tools: their parameters, internal flow logic, return types, and error conditions.
+This document covers all 25 MCP-exposed tools: their parameters, internal flow logic, return types, and error conditions.
 
 All tools return JSON via `{ content: [{ type: "text", text: "<json>" }] }`. On error, responses include `isError: true` with a `{ success: false, error: "<message>" }` payload.
 
@@ -21,6 +21,7 @@ All tools return JSON via `{ content: [{ type: "text", text: "<json>" }] }`. On 
   - [classify_senders](#classify_senders)
 - [Rule Management](#rule-management)
   - [add_regex_rule](#add_regex_rule)
+  - [add_subject_route](#add_subject_route)
   - [remove_rule](#remove_rule)
   - [list_rules](#list_rules)
   - [evaluate_regex](#evaluate_regex)
@@ -236,11 +237,12 @@ Combined convenience tool: looks up the sender in the rules, then applies the ma
 |---|---|---|---|
 | `uid` | `number` | Yes | The email UID. |
 | `from_address` | `string` | Yes | The sender email address. |
+| `subject` | `string` | No | Email subject line. When provided, evaluates subject routes for subject-aware routing. |
 
 #### Flow Logic
 
 ```
-1. Call lookupSender(from_address)
+1. Call lookupSender(from_address, subject)
 2. If matched == false:
    - Return immediately with action: "unknown", no operations
 3. If matched == true:
@@ -298,7 +300,7 @@ Note: unknown senders are **not** moved or modified. They stay in INBOX. The `ma
 
 ### `process_known_senders`
 
-Batch process the entire inbox. Loops through emails in batches, applies actions for all known senders, and collects up to 50 unique unknown senders for classification.
+Batch process the entire inbox. Loops through emails in batches, applies actions for all known senders (with subject-aware routing when subject routes are defined), and collects up to 50 unique unknown senders for classification.
 
 This is the primary workhorse tool for inbox triage.
 
@@ -453,13 +455,18 @@ Look up a sender email address against the rules config. Read-only; does not mod
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `email_address` | `string` | Yes | The sender email address to look up. |
+| `subject` | `string` | No | Email subject line. When provided, evaluates subject routes on the matched sender rule. |
 
 #### Flow Logic
 
 ```
 1. Normalize email to lowercase
 2. Check exact rules Map
-3. If exact match found → return with match_type: "exact", rule_id
+3. If exact match found:
+   a. If subject provided AND rule has subject_routes:
+      - Evaluate each route's contains keywords against subject (case-insensitive, first match wins)
+      - If route matches → return with route's action and route_id
+   b. Return with base action, match_type: "exact", rule_id
 4. If no exact match, iterate regex rules (definition order):
    a. Compile pattern (cached) with case-insensitive flag
    b. If pattern matches → return with match_type: "regex", matched_pattern, rule_id
@@ -475,6 +482,21 @@ Look up a sender email address against the rules config. Read-only; does not mod
   "matched": true,
   "match_type": "exact",
   "rule_id": "a1b2c3d4"
+}
+```
+
+#### Response (subject route match)
+
+```json
+{
+  "email_address": "noreply@store.com",
+  "action": "shipping",
+  "matched": true,
+  "match_type": "exact",
+  "rule_id": "a1b2c3d4",
+  "route_id": "a1b2c3d5",
+  "important": true,
+  "important_ttl_days": 1
 }
 ```
 
@@ -513,6 +535,9 @@ Persist a single sender-to-action mapping. Case-insensitive. Overwrites existing
 |---|---|---|---|
 | `email_address` | `string` | Yes | The sender email address to classify. |
 | `action` | `string` | Yes | The action to assign. Must be a valid action name. |
+| `important` | `boolean` | No | When true, hold in inbox with TTL before routing. |
+| `important_ttl_days` | `number` | No | Days to hold when important (default: 7). |
+| `subject_routes` | `Array<{ contains, action, important?, important_ttl_days? }>` | No | Subject-based routing. When provided, replaces all existing subject routes. Existing routes are preserved when omitted. |
 
 #### Flow Logic
 
@@ -520,10 +545,12 @@ Persist a single sender-to-action mapping. Case-insensitive. Overwrites existing
 1. Normalize email and action to lowercase
 2. Validate action against current action table
 3. If invalid → throw Error with list of valid actions
-4. Check if email already exists in rules (for overwritten flag)
-5. Set rule: rules.set(normalized_email, action)
-6. Save entire rules map to config/sender-rules.json
-7. Return result
+4. If subject_routes provided → validate each route's action
+5. Check if email already exists in rules (for overwritten flag)
+6. Set rule: rules.set(normalized_email, { action, important, subject_routes })
+   - Preserves existing subject_routes if not explicitly provided
+7. Save entire rules map to config/sender-rules.json
+8. Return result
 ```
 
 #### Response
@@ -556,7 +583,7 @@ Bulk classify multiple senders in a single atomic write. Invalid entries are col
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `classifications` | `Array<{ email_address, action }>` | Yes | Array of sender-to-action mappings. |
+| `classifications` | `Array<{ email_address, action, important?, important_ttl_days?, subject_routes? }>` | Yes | Array of sender-to-action mappings with optional importance settings and subject routes. |
 
 #### Flow Logic
 
@@ -644,9 +671,60 @@ Add a new regex pattern rule for sender matching. Regex rules are evaluated afte
 
 ---
 
+### `add_subject_route`
+
+Add subject-based routing to an existing sender rule. Emails matching any keyword in `contains` (case-insensitive substring, OR logic) route to the specified action instead of the sender's base action. First matching route wins.
+
+#### Parameters
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `email_address` | `string` | Yes | Sender email address (must have an existing exact rule). |
+| `contains` | `string[]` | Yes | Case-insensitive keywords to match in subject line (OR logic). |
+| `action` | `string` | Yes | Action to apply when subject matches. Must be a valid action name. |
+| `important` | `boolean` | No | Override sender-level important setting for this route. |
+| `important_ttl_days` | `number` | No | Days to hold in inbox when important. |
+
+#### Flow Logic
+
+```
+1. Normalize email to lowercase
+2. Check if email_address exists as an exact rule
+   - If not found → throw Error
+3. Validate action against current action table
+4. Validate contains is non-empty array of non-empty strings
+5. Generate unique 8-char hex route_id
+6. Append route to exactRule.subject_routes array
+7. Save entire rules config to disk
+8. Return created route
+```
+
+#### Response
+
+```json
+{
+  "email_address": "noreply@store.com",
+  "route_id": "a1b2c3d5",
+  "contains": ["shipped", "tracking", "delivered"],
+  "action": "shipping",
+  "base_action": "subscriptions",
+  "total_routes": 2
+}
+```
+
+#### Errors
+
+| Error | Condition |
+|---|---|
+| `Error` | Sender email address not found in exact rules |
+| `Error` | Action name is not in the action table |
+| `Error` | `contains` is empty or contains empty strings |
+
+---
+
 ### `remove_rule`
 
-Remove a classification rule (exact or regex) by `rule_id`, `email_address`, or `pattern`. Unified tool that replaces the earlier `remove_regex_rule`.
+Remove a classification rule (exact or regex) by `rule_id`, `email_address`, or `pattern`. Use `route_id` to remove a single subject route without removing the sender rule.
 
 #### Parameters
 
@@ -655,22 +733,26 @@ Remove a classification rule (exact or regex) by `rule_id`, `email_address`, or 
 | `rule_id` | `string` | No* | The rule_id of the rule to remove (works for both exact and regex rules). Takes precedence. |
 | `email_address` | `string` | No* | The email address of an exact rule to remove. |
 | `pattern` | `string` | No* | The pattern string of a regex rule to remove. |
+| `route_id` | `string` | No* | The route_id of a subject route to remove (removes only that route, not the sender rule). |
 
-\* At least one of `rule_id`, `email_address`, or `pattern` must be provided.
+\* At least one of `rule_id`, `email_address`, `pattern`, or `route_id` must be provided.
 
 #### Flow Logic
 
 ```
-1. If none of rule_id, email_address, pattern provided → throw Error
-2. If rule_id provided:
+1. If none of rule_id, email_address, pattern, route_id provided → throw Error
+2. If route_id provided:
+   a. Search all exact rules for a subject_route with matching route_id
+   b. If found → splice route from array, save rules, return
+3. If rule_id provided:
    a. Search exact rules by rule_id → if found, remove and return
    b. Search regex rules by rule_id → if found, remove and return
-3. If email_address provided:
+4. If email_address provided:
    a. Normalize to lowercase
    b. Search exact rules by email → if found, remove and return
-4. If pattern provided:
+5. If pattern provided:
    a. Search regex rules by pattern string → if found, remove and return
-5. If not found → return { removed: false }
+6. If not found → return { removed: false }
 ```
 
 #### Response (exact rule removed)
@@ -717,7 +799,7 @@ Browse all classification rules (exact and regex) with filtering, search, and pa
 |---|---|---|---|---|
 | `action` | `string` | No | — | Filter to rules matching this action name. |
 | `type` | `string` | No | `"all"` | Filter by rule type: `"exact"`, `"regex"`, or `"all"`. |
-| `search` | `string` | No | — | Case-insensitive substring search across email addresses, patterns, descriptions, and action names. |
+| `search` | `string` | No | — | Case-insensitive substring search across email addresses, patterns, descriptions, action names, and subject route keywords. |
 | `limit` | `number` | No | `100` | Max results to return. Range: 1-500. |
 | `offset` | `number` | No | `0` | Offset for pagination. |
 
@@ -756,13 +838,22 @@ Browse all classification rules (exact and regex) with filtering, search, and pa
       "type": "exact",
       "rule_id": "e5f6a7b8",
       "action": "subscriptions",
-      "email_address": "newsletter@example.com"
+      "email_address": "noreply@store.com",
+      "subject_routes": [
+        {
+          "route_id": "e5f6a7b9",
+          "contains": ["shipped", "delivered", "tracking"],
+          "action": "shipping",
+          "important": true,
+          "important_ttl_days": 1
+        }
+      ]
     }
   ]
 }
 ```
 
-Each result has a `type` field (`"exact"` or `"regex"`). Exact rules include `email_address`; regex rules include `pattern` and optionally `description`.
+Each result has a `type` field (`"exact"` or `"regex"`). Exact rules include `email_address` and optionally `subject_routes`; regex rules include `pattern` and optionally `description`.
 
 ---
 

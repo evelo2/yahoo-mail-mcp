@@ -1,6 +1,6 @@
 # Yahoo Mail MCP Server
 
-An MCP (Model Context Protocol) server that proxies Yahoo Mail IMAP access for AI-driven email triage. It exposes 24 tools that allow an AI assistant to list, read, classify, and batch-process emails using a rules-based sender classification system with support for both exact-match and regex pattern rules.
+An MCP (Model Context Protocol) server that proxies Yahoo Mail IMAP access for AI-driven email triage. It exposes 25 tools that allow an AI assistant to list, read, classify, and batch-process emails using a rules-based sender classification system with support for exact-match rules, regex pattern rules, and subject-line branching for sender-specific routing.
 
 ## How It Works
 
@@ -26,6 +26,7 @@ Emails sitting in your INBOX are considered **unprocessed**. The server maintain
 | `classify_sender` | Persist a sender-to-action exact rule |
 | `classify_senders` | Bulk classify multiple senders |
 | `add_regex_rule` | Add a regex pattern rule for sender matching |
+| `add_subject_route` | Add subject-based routing to an existing sender rule |
 | `remove_rule` | Remove any rule (exact or regex) by ID, email, or pattern |
 | `list_rules` | Browse all rules with filtering and pagination |
 | `evaluate_regex` | Preview a regex pattern against rules and inbox |
@@ -176,7 +177,7 @@ Add to your Claude Desktop MCP configuration:
 |---|---|
 | [Architecture](docs/architecture.md) | System design, components, data stores, action/rule model, TTL system |
 | [Actions Reference](docs/ACTIONS.md) | Complete reference for all 23 actions with folders, flags, and TTL settings |
-| [MCP Tools Reference](docs/mcp-tools-reference.md) | Detailed parameter specs, flow logic, and return types for all 24 tools |
+| [MCP Tools Reference](docs/mcp-tools-reference.md) | Detailed parameter specs, flow logic, and return types for all 25 tools |
 | [Configuration Guide](docs/configuration.md) | Sender rules, custom actions, and environment variables |
 
 ### Diagrams

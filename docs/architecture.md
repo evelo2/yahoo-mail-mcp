@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The Yahoo Mail MCP Server is a locally-running Node.js MCP server that proxies Yahoo Mail via IMAP using [imapflow](https://imapflow.com/). It communicates with Claude (Claude Desktop or Claude Code) over the MCP stdio transport protocol, exposing 24 tools for AI-driven email triage.
+The Yahoo Mail MCP Server is a locally-running Node.js MCP server that proxies Yahoo Mail via IMAP using [imapflow](https://imapflow.com/). It communicates with Claude (Claude Desktop or Claude Code) over the MCP stdio transport protocol, exposing 25 tools for AI-driven email triage.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -14,7 +14,7 @@ The Yahoo Mail MCP Server is a locally-running Node.js MCP server that proxies Y
 │            Yahoo Mail MCP Server             │
 │  ┌─────────────┐  ┌──────────────────────┐  │
 │  │ Tool Router │  │   Rules Engine        │  │
-│  │ (24 tools)  │  │ exact + regex + TTL   │  │
+│  │ (25 tools)  │  │ exact + regex + TTL   │  │
 │  └──────┬──────┘  └──────────┬───────────┘  │
 │         │                    │               │
 │  ┌──────▼────────────────────▼───────────┐  │
@@ -46,7 +46,7 @@ See [06_architecture.mermaid](diagrams/06_architecture.mermaid) for a rendered c
 ```
 src/
 ├── index.ts                 Entry point: loads config, runs preflight, starts server
-├── server.ts                Creates McpServer, registers all 24 tools
+├── server.ts                Creates McpServer, registers all 25 tools
 ├── preflight.ts             Startup validation (IMAP, folders, fetch test)
 ├── imap/
 │   ├── client.ts            IMAP connection management (singleton, reconnect)
@@ -66,6 +66,7 @@ src/
 │   ├── classify-sender.ts
 │   ├── classify-senders.ts
 │   ├── add-regex-rule.ts
+│   ├── add-subject-route.ts
 │   ├── remove-rule.ts
 │   ├── list-rules.ts
 │   ├── evaluate-regex.ts
@@ -88,7 +89,7 @@ src/
 
 ## Components
 
-### Tool Router (24 tools)
+### Tool Router (25 tools)
 
 Tools are grouped by category:
 
@@ -96,7 +97,7 @@ Tools are grouped by category:
 |---|---|---|
 | Email Operations | `list_inbox_emails`, `get_email`, `apply_action`, `process_email`, `process_known_senders`, `list_folder_emails` | 6 |
 | Sender Classification | `lookup_sender`, `classify_sender`, `classify_senders` | 3 |
-| Rule Management | `add_regex_rule`, `remove_rule`, `list_rules`, `evaluate_regex` | 4 |
+| Rule Management | `add_regex_rule`, `add_subject_route`, `remove_rule`, `list_rules`, `evaluate_regex` | 5 |
 | Action Management | `add_action`, `get_actions` | 2 |
 | System Operations | `ensure_folders`, `get_run_summary`, `health_check` | 3 |
 | TTL Management | `process_ttl_expirations` | 1 |
@@ -181,13 +182,24 @@ See [04_ttl_expiry.mermaid](diagrams/04_ttl_expiry.mermaid) for a visual flow.
 ```typescript
 interface ExactRule {
   action: string;
-  rule_id: string;           // 8-char hex, stable across saves
-  important?: boolean;        // Hold in inbox with TTL
-  important_ttl_days?: number; // Days before routing (default: 7)
+  rule_id: string;              // 8-char hex, stable across saves
+  important?: boolean;           // Hold in inbox with TTL
+  important_ttl_days?: number;   // Days before routing (default: 7)
+  subject_routes?: SubjectRoute[]; // Subject-line branching (optional)
+}
+
+interface SubjectRoute {
+  route_id: string;              // Unique ID for targeted removal
+  contains: string[];            // Case-insensitive substring keywords (OR logic)
+  action: string;                // Override action when subject matches
+  important?: boolean;           // Override sender-level important setting
+  important_ttl_days?: number;
 }
 ```
 
 Stored as `Map<lowercase_email, ExactRule>` in memory, serialized as a plain object in `sender-rules.json`.
+
+**Subject routes** allow a single sender to route to different actions based on email subject keywords. When `subject_routes` is present, the engine evaluates each route's `contains` keywords against the subject (case-insensitive substring match, OR logic). First matching route wins. If no route matches, the base `action` is used. Subject routes can independently set `important` and `important_ttl_days`, overriding the sender-level settings.
 
 ### Regex Rules
 
@@ -207,6 +219,8 @@ Stored as an ordered array. Patterns validated against catastrophic backtracking
 ### Evaluation Order
 
 1. **Exact rules first** — O(1) Map lookup by normalized (lowercase) email
+   - If matched and `subject_routes` exist: evaluate subject routes in order (first match wins)
+   - If no subject route matches: use base `action`
 2. **Regex rules second** — iterated in definition order, first match wins
 3. **No match** — returns `action: "unknown"`, `matched: false`
 
@@ -232,7 +246,7 @@ Stored as an ordered array. Patterns validated against catastrophic backtracking
    d. Open INBOX, get message count
    e. Fetch a sample email by UID
    f. Print report, exit(1) on failure
-6. Create MCP server with 24 tools
+6. Create MCP server with 25 tools
 7. Initialize tool modules with shared state (rules reference)
 8. Start transport:
    - stdio: connect StdioServerTransport
