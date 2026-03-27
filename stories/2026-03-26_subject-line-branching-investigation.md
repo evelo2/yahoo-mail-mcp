@@ -224,5 +224,5 @@ For each option, assess impact on these MCP tools:
 - Option A is the current leading candidate due to its O(1) preservation for
   non-branching senders and clean fallback semantics. The investigation should
   confirm or challenge this.
-- Existing rule count: 451 (422 exact, 29 regex). Estimate how many would
+- Existing rule count: ~450 (example scale — exact count varies). Estimate how many would
   benefit from subject branching to size the feature appropriately.

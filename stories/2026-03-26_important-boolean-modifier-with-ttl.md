@@ -77,11 +77,11 @@ A new persistent store tracks which inbox emails are being held under the import
 {
   "ttl_records": [
     {
-      "uid": 527668,
-      "action": "govtax",
-      "arrived_at": "2026-02-12T22:33:47.000Z",
-      "expires_at": "2026-03-13T22:33:47.000Z",
-      "folder": "Gov Tax"
+      "uid": 10001,
+      "action": "example-action",
+      "arrived_at": "2026-01-15T10:00:00.000Z",
+      "expires_at": "2026-02-15T10:00:00.000Z",
+      "folder": "Example Folder"
     }
   ]
 }
