@@ -7,6 +7,7 @@ export interface LookupResult {
   matched: boolean;
   match_type?: 'exact' | 'regex';
   matched_pattern?: string;
+  matched_subject_pattern?: string;
   rule_id?: string;
   route_id?: string;
   important?: boolean;
@@ -48,9 +49,9 @@ export function lookupSender(rules: SenderRules, emailAddress: string, subject?:
   if (exactRule) {
     // 1a. Check subject routes if subject provided and routes exist (first match wins)
     if (subject && exactRule.subject_routes?.length) {
-      const lowerSubject = subject.toLowerCase();
       for (const route of exactRule.subject_routes) {
-        if (route.contains.some(kw => lowerSubject.includes(kw.toLowerCase()))) {
+        const re = getCompiledRegex(route.pattern);
+        if (re && re.test(subject)) {
           // Subject route can override or inherit the sender-level important setting
           const important = route.important ?? exactRule.important;
           const ttlDays = route.important_ttl_days ?? (route.important != null ? 7 : exactRule.important_ttl_days ?? 7);
@@ -61,6 +62,7 @@ export function lookupSender(rules: SenderRules, emailAddress: string, subject?:
             match_type: 'exact',
             rule_id: exactRule.rule_id,
             route_id: route.route_id,
+            matched_subject_pattern: route.pattern,
             ...(important ? { important: true, important_ttl_days: ttlDays } : {}),
           };
         }

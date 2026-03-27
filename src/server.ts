@@ -170,7 +170,7 @@ export function createServer(rules: SenderRules): McpServer {
   );
 
   const zSubjectRouteInput = z.object({
-    contains: z.array(z.string().min(1)).min(1).describe('Case-insensitive keywords to match in subject (OR logic)'),
+    pattern: z.string().min(1).describe('Regex pattern matched case-insensitively against subject line. Use | for OR: "ship|track|deliver". Use .* between words: "order.*confirm".'),
     action: z.string().describe('The action to apply when subject matches'),
     important: z.boolean().optional().describe('Override sender-level important setting for this route'),
     important_ttl_days: z.number().int().min(1).optional().describe('Days to hold when important'),
@@ -387,10 +387,10 @@ export function createServer(rules: SenderRules): McpServer {
 
   server.tool(
     'add_subject_route',
-    'Add a subject-based routing rule to an existing sender. Emails matching any keyword in contains (case-insensitive, OR logic) route to the specified action instead of the sender\'s base action. First matching route wins.',
+    'Add a subject-based routing rule to an existing sender. The regex pattern is matched case-insensitively against the subject line. Use | for OR logic ("ship|track|deliver") and .* between words ("order.*confirm"). First matching route wins.',
     {
       email_address: zEmail.describe('Sender email address (must have an existing exact rule)'),
-      contains: z.array(z.string().min(1)).min(1).describe('Case-insensitive keywords to match in subject line (OR logic)'),
+      pattern: z.string().min(1).describe('Regex pattern to match subject line (case-insensitive). Use | for OR: "ship|track|deliver". Use .* between words: "order.*confirm". Avoid overly broad patterns like ^.*$.'),
       action: z.string().describe('The action to apply when subject matches (must be a valid action name)'),
       important: z.boolean().optional().describe('Override sender-level important setting for this route'),
       important_ttl_days: z.number().int().min(1).optional().describe('Days to hold in inbox when important'),

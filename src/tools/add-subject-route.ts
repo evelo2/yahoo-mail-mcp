@@ -9,13 +9,13 @@ export function initAddSubjectRoute(senderRules: SenderRules) {
 
 export async function handleAddSubjectRoute(params: {
   email_address: string;
-  contains: string[];
+  pattern: string;
   action: string;
   important?: boolean;
   important_ttl_days?: number;
 }) {
   return addSubjectRoute(rules, params.email_address, {
-    contains: params.contains,
+    pattern: params.pattern,
     action: params.action,
     important: params.important,
     important_ttl_days: params.important_ttl_days,

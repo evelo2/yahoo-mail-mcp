@@ -13,7 +13,7 @@ export async function handleClassifySender(params: {
   action: string;
   important?: boolean;
   important_ttl_days?: number;
-  subject_routes?: Array<{ contains: string[]; action: string; important?: boolean; important_ttl_days?: number }>;
+  subject_routes?: Array<{ pattern: string; action: string; important?: boolean; important_ttl_days?: number }>;
 }): Promise<{
   email_address: string;
   action: string;
@@ -38,12 +38,18 @@ export async function handleClassifySender(params: {
     if (!validActions.has(srAction)) {
       throw new Error(`Invalid subject route action: "${srAction}". Valid actions: ${[...validActions].join(', ')}`);
     }
-    if (!sr.contains.length || sr.contains.some(k => !k.trim())) {
-      throw new Error('subject_routes contains must be a non-empty array of non-empty strings');
+    if (!sr.pattern || !sr.pattern.trim()) {
+      throw new Error('subject_routes pattern must be a non-empty string');
+    }
+    if (sr.pattern === '^.*$' || sr.pattern === '.*') {
+      throw new Error(`Subject route pattern is too broad: "${sr.pattern}"`);
+    }
+    try { new RegExp(sr.pattern); } catch (e) {
+      throw new Error(`Invalid subject route pattern "${sr.pattern}": ${(e as Error).message}`);
     }
     return {
       route_id: generateRuleId(),
-      contains: sr.contains,
+      pattern: sr.pattern,
       action: srAction,
       ...(sr.important != null ? { important: sr.important } : {}),
       ...(sr.important_ttl_days != null ? { important_ttl_days: sr.important_ttl_days } : {}),

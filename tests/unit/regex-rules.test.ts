@@ -324,7 +324,7 @@ describe('Regex Rules — tool handlers', () => {
 
   it('handleRemoveRule requires at least one identifier', async () => {
     await expect(handleRemoveRule({})).rejects.toThrow(
-      /At least one of rule_id, email_address, or pattern must be provided/,
+      /At least one of rule_id, email_address, pattern, or route_id must be provided/,
     );
   });
 });

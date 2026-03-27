@@ -13,7 +13,7 @@ interface Classification {
   action: string;
   important?: boolean;
   important_ttl_days?: number;
-  subject_routes?: Array<{ contains: string[]; action: string; important?: boolean; important_ttl_days?: number }>;
+  subject_routes?: Array<{ pattern: string; action: string; important?: boolean; important_ttl_days?: number }>;
 }
 
 interface FailedClassification {
@@ -61,9 +61,19 @@ export async function handleClassifySenders(params: {
           routeError = true;
           break;
         }
+        if (!sr.pattern || !sr.pattern.trim() || sr.pattern === '^.*$' || sr.pattern === '.*') {
+          failed.push({ email_address: entry.email_address, action: entry.action, error: `Invalid or too-broad subject route pattern: "${sr.pattern}"` });
+          routeError = true;
+          break;
+        }
+        try { new RegExp(sr.pattern); } catch (e) {
+          failed.push({ email_address: entry.email_address, action: entry.action, error: `Invalid subject route pattern "${sr.pattern}": ${(e as Error).message}` });
+          routeError = true;
+          break;
+        }
         subjectRoutes.push({
           route_id: generateRuleId(),
-          contains: sr.contains,
+          pattern: sr.pattern,
           action: srAction,
           ...(sr.important != null ? { important: sr.important } : {}),
           ...(sr.important_ttl_days != null ? { important_ttl_days: sr.important_ttl_days } : {}),

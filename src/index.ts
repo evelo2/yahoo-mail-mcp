@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { loadSenderRules, loadCustomActions } from './rules/config.js';
+import { loadSenderRules, loadCustomActions, migrateSubjectRoutesToPattern } from './rules/config.js';
 import { initPromptManager } from './prompt/manager.js';
 import { initAuditLog } from './utils/audit-log.js';
 import { initTtlStore } from './utils/ttl-store.js';
@@ -29,6 +29,12 @@ async function main() {
 
   const rules = loadSenderRules(configPath);
   logger.info({ exactRules: rules.exact.size, regexRules: rules.regex.length }, 'Sender rules loaded');
+
+  // Migrate any legacy subject routes (contains[] → pattern) on first run after upgrade
+  const migratedRoutes = migrateSubjectRoutesToPattern(rules);
+  if (migratedRoutes > 0) {
+    logger.info({ migratedRoutes }, 'Migrated subject routes from contains[] to pattern');
+  }
 
   // Initialize prompt manager (creates default prompt.md on first run)
   initPromptManager(getPromptDir());

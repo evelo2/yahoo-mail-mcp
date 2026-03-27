@@ -17,7 +17,7 @@ export type Action = string;
 
 export interface SubjectRoute {
   route_id: string;
-  contains: string[];          // case-insensitive substring matches, OR logic
+  pattern: string;             // regex pattern, matched with 'i' flag
   action: string;
   important?: boolean;
   important_ttl_days?: number;
@@ -300,7 +300,7 @@ export function removeRule(
 export interface AddSubjectRouteResult {
   email_address: string;
   route_id: string;
-  contains: string[];
+  pattern: string;
   action: string;
   base_action: string;
   total_routes: number;
@@ -308,10 +308,24 @@ export interface AddSubjectRouteResult {
   important_ttl_days?: number;
 }
 
+function validateSubjectPattern(pattern: string): void {
+  if (!pattern || !pattern.trim()) {
+    throw new Error('Subject route pattern must be a non-empty string');
+  }
+  if (pattern === '^.*$' || pattern === '.*') {
+    throw new Error('Subject route pattern is too broad. Use a specific pattern that matches meaningful subject content.');
+  }
+  try {
+    new RegExp(pattern);
+  } catch (e) {
+    throw new Error(`Invalid regex pattern "${pattern}": ${(e as Error).message}`);
+  }
+}
+
 export function addSubjectRoute(
   rules: SenderRules,
   emailAddress: string,
-  route: { contains: string[]; action: string; important?: boolean; important_ttl_days?: number },
+  route: { pattern: string; action: string; important?: boolean; important_ttl_days?: number },
 ): AddSubjectRouteResult {
   const normalized = emailAddress.toLowerCase();
   const exactRule = rules.exact.get(normalized);
@@ -325,13 +339,11 @@ export function addSubjectRoute(
     throw new Error(`Invalid action: "${action}". Valid actions: ${[...validActions].join(', ')}`);
   }
 
-  if (!route.contains.length || route.contains.some(k => !k.trim())) {
-    throw new Error('contains must be a non-empty array of non-empty strings');
-  }
+  validateSubjectPattern(route.pattern);
 
   const subjectRoute: SubjectRoute = {
     route_id: generateRuleId(),
-    contains: route.contains,
+    pattern: route.pattern,
     action,
     ...(route.important != null ? { important: route.important } : {}),
     ...(route.important_ttl_days != null ? { important_ttl_days: route.important_ttl_days } : {}),
@@ -341,18 +353,46 @@ export function addSubjectRoute(
   exactRule.subject_routes.push(subjectRoute);
   saveSenderRules(rules);
 
-  logger.info({ email: normalized, route_id: subjectRoute.route_id, action, contains: route.contains }, 'Subject route added');
+  logger.info({ email: normalized, route_id: subjectRoute.route_id, action, pattern: route.pattern }, 'Subject route added');
 
   return {
     email_address: normalized,
     route_id: subjectRoute.route_id,
-    contains: route.contains,
+    pattern: route.pattern,
     action,
     base_action: exactRule.action,
     total_routes: exactRule.subject_routes.length,
     ...(route.important != null ? { important: route.important } : {}),
     ...(route.important_ttl_days != null ? { important_ttl_days: route.important_ttl_days } : {}),
   };
+}
+
+// ── Startup migration: contains[] → pattern ──
+
+/**
+ * One-time migration: any subject route written with the old `contains: string[]`
+ * format is converted to `pattern: string` (each literal joined with `|`).
+ * Idempotent — routes that already have `pattern` are skipped.
+ * Returns the number of routes migrated.
+ */
+export function migrateSubjectRoutesToPattern(rules: SenderRules): number {
+  let migrated = 0;
+  for (const [, rule] of rules.exact) {
+    if (!rule.subject_routes?.length) continue;
+    for (const route of rule.subject_routes) {
+      const legacy = route as unknown as { contains?: string[] };
+      if (!legacy.contains?.length) continue;
+      // Escape special regex chars in each literal, join with |
+      const escaped = legacy.contains.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      (route as any).pattern = escaped.join('|');
+      delete legacy.contains;
+      migrated++;
+    }
+  }
+  if (migrated > 0) {
+    saveSenderRules(rules);
+  }
+  return migrated;
 }
 
 // ── Custom Actions persistence ──

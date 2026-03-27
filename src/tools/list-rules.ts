@@ -62,7 +62,7 @@ export async function handleListRules(params: {
         if (!hasMatchingRoute) continue;
       }
       if (search) {
-        const routeKeywords = rule.subject_routes?.flatMap(sr => sr.contains).join(' ') ?? '';
+        const routeKeywords = rule.subject_routes?.map(sr => sr.pattern).join(' ') ?? '';
         const haystack = `${email} ${rule.action} ${routeKeywords}`.toLowerCase();
         if (!haystack.includes(search)) continue;
       }

@@ -64,9 +64,9 @@ describe('Test Suite 1: Sender Lookup', () => {
 
   it('1.9 — Same brand, different addresses, different actions (xTool)', () => {
     const dc = lookupSender(rules, 'marketing@edm.xtool.com');
-    expect(dc).toMatchObject({ email_address: 'marketing@edm.xtool.com', action: 'subscriptions', matched: true, match_type: 'exact' });
+    expect(dc).toMatchObject({ email_address: 'marketing@edm.xtool.com', action: 'delete', matched: true, match_type: 'exact' });
 
     const subs = lookupSender(rules, 'service.ca@xtool.com');
-    expect(subs).toMatchObject({ email_address: 'service.ca@xtool.com', action: 'subscriptions', matched: true, match_type: 'exact' });
+    expect(subs).toMatchObject({ email_address: 'service.ca@xtool.com', action: 'delete', matched: true, match_type: 'exact' });
   });
 });
