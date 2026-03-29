@@ -24,7 +24,7 @@ export function createMockMessage(overrides: {
     flags: new Set(overrides.flags || []),
     envelope: {
       from: [{ address: overrides.from_address, name: overrides.from_name || '' }],
-      to: [{ address: 'paul.thomas777@yahoo.com', name: 'Paul Thomas' }],
+      to: [{ address: 'recipient@example.com', name: 'Test User' }],
       subject: overrides.subject || 'Test Email',
       date: overrides.date || new Date('2026-03-10T14:22:00Z'),
     },

@@ -432,3 +432,210 @@ describe('Test Suite 11: process_known_senders', () => {
     expect(result.actions_summary).toEqual({ subscriptions: 1, delete: 1, invoice: 1 });
   });
 });
+
+// ── Subject route evaluation tests ─────────────────────────────────────────────
+// Verifies that process_known_senders passes the email subject to lookupSender
+// and correctly routes based on subject_routes when they exist.
+
+describe('Test Suite 12: process_known_senders — subject route evaluation', () => {
+  // Sender with two subject routes: order confirmation → invoice (important),
+  // shipping → invoice. Base action is watches.
+  const rulesWithRoutes: SenderRules = {
+    exact: new Map([
+      ['noreply@store-example.com', {
+        action: 'watches',
+        rule_id: 'sr_test001',
+        subject_routes: [
+          { route_id: 'sr_r001', pattern: 'order.*confirm', action: 'invoice', important: true, important_ttl_days: 1 },
+          { route_id: 'sr_r002', pattern: 'ship|track|deliver', action: 'invoice' },
+        ],
+      }],
+      // Sender without subject routes — regression guard
+      ['newsletter@brand-example.com', { action: 'subscriptions', rule_id: 'sr_test002' }],
+    ]),
+    regex: [],
+    configPath: '/tmp/test-subject-routes.json',
+  };
+
+  beforeEach(() => {
+    // Register 'watches' as a custom action (not a built-in)
+    registerAction('watches', { moveToFolder: 'watches', markRead: true });
+    initProcessKnownSenders(rulesWithRoutes);
+  });
+
+  it('12.1 — Subject matches first route → route action applied, not base action', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2000,
+        from_address: 'noreply@store-example.com',
+        subject: 'Order SR-88421 confirmed — thank you!',
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    // Important hold: email stays in inbox, gets flagged — NOT moved to watches
+    expect(result.important_held).toBe(1);
+    expect(result.known_processed).toBe(0);
+    expect(result.actions_summary).toEqual({ important_held: 1 });
+    // Email must remain in inbox (flagged, not moved)
+    expect(mockClient._movedMessages.has(2000)).toBe(false);
+    expect(mockClient._messages.find(m => m.uid === 2000)).toBeDefined();
+    // Email should be flagged
+    const msg = mockClient._messages.find(m => m.uid === 2000);
+    expect(msg?.flags.has('\\Flagged')).toBe(true);
+  });
+
+  it('12.2 — Subject matches second route (no important) → route action applied immediately', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2001,
+        from_address: 'noreply@store-example.com',
+        subject: 'Your order has shipped — tracking available',
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    // No important flag → email moved to invoices folder immediately
+    expect(result.known_processed).toBe(1);
+    expect(result.important_held).toBe(0);
+    expect(result.actions_summary).toEqual({ invoice: 1 });
+    expect(mockClient._movedMessages.get(2001)).toBe('invoices');
+  });
+
+  it('12.3 — Subject does not match any route → base action applied', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2002,
+        from_address: 'noreply@store-example.com',
+        subject: 'Spring sale — 40% off everything this weekend!',
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    // No route match → base action (watches)
+    expect(result.known_processed).toBe(1);
+    expect(result.important_held).toBe(0);
+    expect(result.actions_summary).toEqual({ watches: 1 });
+    expect(mockClient._movedMessages.get(2002)).toBe('watches');
+  });
+
+  it('12.4 — Multiple emails same sender, different subjects → each routed independently', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2010,
+        from_address: 'noreply@store-example.com',
+        subject: 'Order SR-99001 confirmed',
+        date: new Date('2026-03-10T12:00:00Z'),
+      }),
+      createMockMessage({
+        uid: 2011,
+        from_address: 'noreply@store-example.com',
+        subject: 'Summer collection now live',
+        date: new Date('2026-03-10T11:00:00Z'),
+      }),
+      createMockMessage({
+        uid: 2012,
+        from_address: 'noreply@store-example.com',
+        subject: 'Your order has shipped',
+        date: new Date('2026-03-10T10:00:00Z'),
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    expect(result.total_fetched).toBe(3);
+    // uid 2010: order confirm → important hold (invoice route)
+    expect(mockClient._movedMessages.has(2010)).toBe(false);
+    const flaggedMsg = mockClient._messages.find(m => m.uid === 2010);
+    expect(flaggedMsg?.flags.has('\\Flagged')).toBe(true);
+    // uid 2011: no route match → base action (watches)
+    expect(mockClient._movedMessages.get(2011)).toBe('watches');
+    // uid 2012: ships route → invoice (no important)
+    expect(mockClient._movedMessages.get(2012)).toBe('invoices');
+    expect(result.important_held).toBe(1);
+    expect(result.known_processed).toBe(2);
+    expect(result.actions_summary).toMatchObject({ important_held: 1, watches: 1, invoice: 1 });
+  });
+
+  it('12.5 — Sender without subject routes unaffected (no regression)', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2020,
+        from_address: 'newsletter@brand-example.com',
+        subject: 'Weekly digest for you',
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    expect(result.known_processed).toBe(1);
+    expect(result.important_held).toBe(0);
+    expect(result.actions_summary).toEqual({ subscriptions: 1 });
+    expect(mockClient._movedMessages.get(2020)).toBe('subscriptions');
+  });
+
+  it('12.6 — Mixed: sender with routes + sender without routes in same batch', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2030,
+        from_address: 'noreply@store-example.com',
+        subject: 'Order SR-77001 confirmed',
+        date: new Date('2026-03-10T12:00:00Z'),
+      }),
+      createMockMessage({
+        uid: 2031,
+        from_address: 'newsletter@brand-example.com',
+        subject: 'Monthly newsletter',
+        date: new Date('2026-03-10T11:00:00Z'),
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    expect(result.total_fetched).toBe(2);
+    expect(result.important_held).toBe(1);
+    expect(result.known_processed).toBe(1);
+    // Store order: flagged in inbox
+    expect(mockClient._movedMessages.has(2030)).toBe(false);
+    const storeMsg = mockClient._messages.find(m => m.uid === 2030);
+    expect(storeMsg?.flags.has('\\Flagged')).toBe(true);
+    // Newsletter: moved to subscriptions
+    expect(mockClient._movedMessages.get(2031)).toBe('subscriptions');
+  });
+
+  it('12.7 — Case-insensitive subject matching', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2040,
+        from_address: 'noreply@store-example.com',
+        subject: 'ORDER SR-12345 CONFIRMED',     // uppercase
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    // Pattern "order.*confirm" with 'i' flag should match uppercase subject
+    expect(result.important_held).toBe(1);
+    expect(mockClient._movedMessages.has(2040)).toBe(false);
+  });
+
+  it('12.8 — Empty subject falls through to base action (no crash)', async () => {
+    mockClient = createMockImapClient([
+      createMockMessage({
+        uid: 2050,
+        from_address: 'noreply@store-example.com',
+        subject: '',
+      }),
+    ]);
+
+    const result = await handleProcessKnownSenders({});
+
+    // Empty subject: lookupSender receives '' which is falsy, skips route eval → base action
+    expect(result.known_processed).toBe(1);
+    expect(result.errors).toBe(0);
+    expect(result.actions_summary).toEqual({ watches: 1 });
+  });
+});

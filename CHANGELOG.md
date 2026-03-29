@@ -4,6 +4,35 @@ Critical feature changes and design decisions for the Yahoo Mail MCP Server. Thi
 
 ---
 
+## 2026-03-28 — Subject Route Evaluation in Batch Processing
+
+### Fixed
+- **`process_email` ignored `lookup.important` flag** — when a subject route
+  matched with `important: true`, the email was moved immediately instead of
+  being held in INBOX with a TTL. Now flags the email and writes a TTL record,
+  consistent with `process_known_senders` behaviour.
+
+### Added
+- **8 new integration tests** in `process-known-senders.test.ts` (Suite 12)
+  covering subject route match → routed action, important hold, no-match
+  fallback to base action, multiple emails from same sender with different
+  subjects, and sender without routes (regression guard).
+- **5 new integration tests** in `unknown-skip.test.ts` covering
+  `process_email` with subject route important hold, non-important route,
+  no-match fallback, omitted subject param, and senders without routes.
+
+### Changed
+- **`tests/fixtures/emails.ts`** — replaced real email address in mock `to`
+  field with `recipient@example.com` per sample-data policy.
+- **`process_email` response** extended to include `route_id`,
+  `matched_subject_pattern`, `important`, and `important_ttl_days` fields
+  when a subject route match is returned.
+- **Performance test thresholds** relaxed to account for timing variability
+  when running alongside larger integration test suites; thresholds remain
+  meaningful guards against O(n) regressions.
+
+---
+
 ## 2026-03-27 — Mask Sensitive Data in Preflight Logs (CWE-312)
 
 ### Fixed
